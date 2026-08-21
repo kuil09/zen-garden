@@ -2,8 +2,7 @@ import spectralShader from './shaders/spectral.wgsl?raw';
 import dynamicShader from './shaders/dynamic.wgsl?raw';
 import resolveShader from './shaders/resolve.wgsl?raw';
 import sceneShader from './shaders/scene.wgsl?raw';
-import particleComputeShader from './shaders/particles-compute.wgsl?raw';
-import particleRenderShader from './shaders/particles-render.wgsl?raw';
+import waveGeometryShader from './shaders/wave-geometry.wgsl?raw';
 import postShader from './shaders/post.wgsl?raw';
 
 const canvas = document.querySelector('#ocean');
@@ -15,9 +14,13 @@ const notice = document.querySelector('#notice');
 const SIMULATION_SIZE = 256;
 const SIMULATION_CELLS = SIMULATION_SIZE * SIMULATION_SIZE;
 const FFT_STAGES = Math.log2(SIMULATION_SIZE);
-const PARTICLE_COUNT = 26_000;
 const OCEAN_COLUMNS = 360;
 const OCEAN_ROWS = 248;
+const WAVE_COLUMNS = 288;
+const WAVE_ROWS = 176;
+const WAVE_INSTANCES = 3;
+const CLAW_COLUMNS = 1024;
+const CLAW_ROWS = 40;
 const DYNAMIC_SUBSTEPS = 4;
 const UNIFORM_FLOATS = 36;
 const UNIFORM_SIZE = UNIFORM_FLOATS * Float32Array.BYTES_PER_ELEMENT;
@@ -38,25 +41,24 @@ let initialSpectrumBuffer;
 let fftBuffers;
 let dynamicBuffers;
 let oceanBuffers;
-let particleBuffer;
 let spectralPipeline;
 let fftPipeline;
 let dynamicPipeline;
 let resolvePipeline;
-let particleComputePipeline;
 let backgroundPipeline;
 let oceanPipeline;
-let particlePipeline;
 let postPipeline;
 let evolveBindGroup;
 let fftPasses;
 let dynamicBindGroups;
 let resolveBindGroups;
 let surfaceBindGroups;
-let particleComputeBindGroups;
-let particleRenderBindGroup;
 let postBindGroup;
 let oceanGrid;
+let waveGrid;
+let wavePipeline;
+let clawGrid;
+let clawPipeline;
 let sceneTexture;
 let multisampleTexture;
 let depthTexture;
@@ -523,19 +525,17 @@ async function initialize() {
     createZeroedBuffer(oceanBufferSize, GPUBufferUsage.STORAGE),
     createZeroedBuffer(oceanBufferSize, GPUBufferUsage.STORAGE),
   ];
-  const particleBufferSize = PARTICLE_COUNT * 8 * Float32Array.BYTES_PER_ELEMENT;
-  particleBuffer = createZeroedBuffer(particleBufferSize, GPUBufferUsage.STORAGE);
 
   oceanGrid = createGrid(OCEAN_COLUMNS, OCEAN_ROWS);
+  waveGrid = createGrid(WAVE_COLUMNS, WAVE_ROWS);
+  clawGrid = createGrid(CLAW_COLUMNS, CLAW_ROWS);
 
-  const [spectralModule, dynamicModule, resolveModule, sceneModule, particleComputeModule, particleRenderModule, postModule] = await Promise.all([
+  const [spectralModule, dynamicModule, resolveModule, sceneModule, postModule] = await Promise.all([
     checkedModule('Spectral ocean compute', spectralShader),
     checkedModule('Dynamic water compute', dynamicShader),
     checkedModule('Ocean field resolve', resolveShader),
-    checkedModule('Ocean scene', sceneShader),
-    checkedModule('Spray compute', particleComputeShader),
-    checkedModule('Spray render', particleRenderShader),
-    checkedModule('HDR post process', postShader),
+    checkedModule('Ocean scene', `${sceneShader}\n${waveGeometryShader}`),
+        checkedModule('HDR post process', postShader),
   ]);
 
   const spectralLayout = device.createBindGroupLayout({
@@ -659,59 +659,13 @@ async function initialize() {
     ...surfaceBase,
     vertex: { ...surfaceVertex, entryPoint: 'oceanVertex' },
   });
-
-  const particleComputeLayout = device.createBindGroupLayout({
-    entries: [
-      { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
-      { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
-      { binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage' } },
-      { binding: 3, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage' } },
-    ],
+  wavePipeline = device.createRenderPipeline({
+    ...surfaceBase,
+    vertex: { ...surfaceVertex, entryPoint: 'waveVertex' },
   });
-  particleComputePipeline = device.createComputePipeline({
-    layout: device.createPipelineLayout({ bindGroupLayouts: [particleComputeLayout] }),
-    compute: { module: particleComputeModule, entryPoint: 'updateParticles' },
-  });
-  particleComputeBindGroups = oceanBuffers.map((oceanBuffer) => dynamicBuffers.map((dynamicBuffer) => device.createBindGroup({
-    layout: particleComputeLayout,
-    entries: [
-      { binding: 0, resource: { buffer: uniformBuffer } },
-      { binding: 1, resource: { buffer: particleBuffer } },
-      { binding: 2, resource: { buffer: oceanBuffer } },
-      { binding: 3, resource: { buffer: dynamicBuffer } },
-    ],
-  })));
-
-  const particleRenderLayout = device.createBindGroupLayout({
-    entries: [
-      { binding: 0, visibility: GPUShaderStage.VERTEX, buffer: { type: 'uniform' } },
-      { binding: 1, visibility: GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } },
-    ],
-  });
-  particlePipeline = device.createRenderPipeline({
-    layout: device.createPipelineLayout({ bindGroupLayouts: [particleRenderLayout] }),
-    vertex: { module: particleRenderModule, entryPoint: 'particleVertex' },
-    fragment: {
-      module: particleRenderModule,
-      entryPoint: 'particleFragment',
-      targets: [{
-        format: HDR_FORMAT,
-        blend: {
-          color: { srcFactor: 'src-alpha', dstFactor: 'one', operation: 'add' },
-          alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha', operation: 'add' },
-        },
-      }],
-    },
-    primitive: { topology: 'triangle-list' },
-    multisample: { count: SAMPLE_COUNT },
-    depthStencil: { ...depthStencil, depthWriteEnabled: false },
-  });
-  particleRenderBindGroup = device.createBindGroup({
-    layout: particleRenderLayout,
-    entries: [
-      { binding: 0, resource: { buffer: uniformBuffer } },
-      { binding: 1, resource: { buffer: particleBuffer } },
-    ],
+  clawPipeline = device.createRenderPipeline({
+    ...surfaceBase,
+    vertex: { ...surfaceVertex, entryPoint: 'clawVertex' },
   });
 
   postPipeline = device.createRenderPipeline({
@@ -763,18 +717,20 @@ function draw(now) {
   const deltaSeconds = moving ? deltaMilliseconds / 1000 : 0;
   const dynamicDelta = Math.min(deltaSeconds, 0.034) * motionSpeed;
   dynamicTime += dynamicDelta;
+  // Hokusai frames the wave from down in the trough, close enough that the crest
+  // takes the top of the plate and the sky survives only in the upper right.
   const camera = [
-    (smoothPointer[0] - 0.5) * 0.42,
-    4.10 + (0.5 - smoothPointer[1]) * 0.30 + Math.sin(elapsed * 0.09 * motionSpeed) * 0.055,
-    -6.2,
+    4.0 + (smoothPointer[0] - 0.5) * 0.30,
+    2.8 + (0.5 - smoothPointer[1]) * 0.22 + Math.sin(elapsed * 0.09 * motionSpeed) * 0.075,
+    -29.0,
   ];
   const target = [
-    (smoothPointer[0] - 0.5) * 0.24,
-    1.08 + (0.5 - smoothPointer[1]) * 0.16,
-    28.0,
+    -5.0 + (smoothPointer[0] - 0.5) * 0.18,
+    9.4 + (0.5 - smoothPointer[1]) * 0.14,
+    12.0,
   ];
   const aspect = canvas.width / canvas.height;
-  const projection = perspectiveLeftHanded(64 * Math.PI / 180, aspect, 0.075, 155);
+  const projection = perspectiveLeftHanded(46 * Math.PI / 180, aspect, 0.35, 260);
   const view = lookAtLeftHanded(camera, target);
   const viewProjection = multiplyMatrices(projection, view);
   const pixelRatio = canvas.clientWidth ? canvas.width / canvas.clientWidth : 1;
@@ -803,7 +759,6 @@ function draw(now) {
   }
   dispatchCompute(encoder, resolvePipeline, resolveBindGroups[oceanBufferIndex][dynamicBufferIndex], groups, groups);
   oceanBufferIndex = 1 - oceanBufferIndex;
-  dispatchCompute(encoder, particleComputePipeline, particleComputeBindGroups[oceanBufferIndex][dynamicBufferIndex], Math.ceil(PARTICLE_COUNT / 256));
 
   const scenePass = encoder.beginRenderPass({
     colorAttachments: [{
@@ -826,9 +781,12 @@ function draw(now) {
   setGrid(scenePass, oceanGrid);
   scenePass.setPipeline(oceanPipeline);
   scenePass.drawIndexed(oceanGrid.indexCount);
-  scenePass.setBindGroup(0, particleRenderBindGroup);
-  scenePass.setPipeline(particlePipeline);
-  scenePass.draw(6, PARTICLE_COUNT);
+  setGrid(scenePass, waveGrid);
+  scenePass.setPipeline(wavePipeline);
+  scenePass.drawIndexed(waveGrid.indexCount, WAVE_INSTANCES);
+  setGrid(scenePass, clawGrid);
+  scenePass.setPipeline(clawPipeline);
+  scenePass.drawIndexed(clawGrid.indexCount, WAVE_INSTANCES);
   scenePass.end();
 
   const postPass = encoder.beginRenderPass({

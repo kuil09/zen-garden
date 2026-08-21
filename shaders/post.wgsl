@@ -33,69 +33,73 @@ fn luminance(color: vec3f) -> f32 {
   return dot(color, vec3f(0.2126, 0.7152, 0.0722));
 }
 
-fn aces(color: vec3f) -> vec3f {
-  let a = 2.51;
-  let b = 0.03;
-  let c = 2.43;
-  let d = 0.59;
-  let e = 0.14;
-  return clamp((color * (a * color + b)) / (color * (c * color + d) + e), vec3f(0.0), vec3f(1.0));
-}
-
 fn hash12(point: vec2f) -> f32 {
   let p = fract(point * vec2f(123.34, 345.45));
   return fract(p.x * p.y * (p.x + p.y + 34.345));
 }
 
+fn valueNoise2(point: vec2f) -> f32 {
+  let cell = floor(point);
+  let local = fract(point);
+  let blend = local * local * (3.0 - 2.0 * local);
+  let a = hash12(cell);
+  let b = hash12(cell + vec2f(1.0, 0.0));
+  let c = hash12(cell + vec2f(0.0, 1.0));
+  let d = hash12(cell + vec2f(1.0, 1.0));
+  return mix(mix(a, b, blend.x), mix(c, d, blend.x), blend.y);
+}
+
+fn tap(uv: vec2f) -> vec3f {
+  return textureSample(sceneTexture, sceneSampler, uv).rgb;
+}
+
+// The scene pass already prints in flat tones, so a Sobel over the frame finds
+// exactly the boundaries a carver would cut: one line per plate edge.
+fn inkEdge(uv: vec2f, texel: vec2f) -> f32 {
+  let tl = luminance(tap(uv + texel * vec2f(-1.0, -1.0)));
+  let tc = luminance(tap(uv + texel * vec2f( 0.0, -1.0)));
+  let tr = luminance(tap(uv + texel * vec2f( 1.0, -1.0)));
+  let ml = luminance(tap(uv + texel * vec2f(-1.0,  0.0)));
+  let mr = luminance(tap(uv + texel * vec2f( 1.0,  0.0)));
+  let bl = luminance(tap(uv + texel * vec2f(-1.0,  1.0)));
+  let bc = luminance(tap(uv + texel * vec2f( 0.0,  1.0)));
+  let br = luminance(tap(uv + texel * vec2f( 1.0,  1.0)));
+  let gx = (tr + 2.0 * mr + br) - (tl + 2.0 * ml + bl);
+  let gy = (bl + 2.0 * bc + br) - (tl + 2.0 * tc + tr);
+  return sqrt(gx * gx + gy * gy);
+}
+
 @fragment
 fn postFragment(input: PostOutput) -> @location(0) vec4f {
-  let uv = input.uv;
-  let pixel = 1.0 / u.resolutionMotion.xy;
-  let radialDirection = uv - 0.5;
-  let aberration = radialDirection * dot(radialDirection, radialDirection) * 0.0022;
-  let center = textureSample(sceneTexture, sceneSampler, uv).rgb;
+  let resolution = u.resolutionMotion.xy;
+  let texel = 1.0 / resolution;
+  let pixel = input.uv * resolution;
+
+  // Plate misregistration: each colour block was pulled by hand and none of them
+  // land quite on top of one another.
+  let slip = texel * 0.85;
   var color = vec3f(
-    textureSample(sceneTexture, sceneSampler, uv + aberration).r,
-    center.g,
-    textureSample(sceneTexture, sceneSampler, uv - aberration).b
+    tap(input.uv + slip * vec2f( 0.9, -0.4)).r,
+    tap(input.uv).g,
+    tap(input.uv + slip * vec2f(-0.7,  0.5)).b
   );
-  let localBlur = (
-    textureSample(sceneTexture, sceneSampler, uv + vec2f(pixel.x, 0.0)).rgb
-      + textureSample(sceneTexture, sceneSampler, uv - vec2f(pixel.x, 0.0)).rgb
-      + textureSample(sceneTexture, sceneSampler, uv + vec2f(0.0, pixel.y)).rgb
-      + textureSample(sceneTexture, sceneSampler, uv - vec2f(0.0, pixel.y)).rgb
-  ) * 0.25;
-  color += (center - localBlur) * 0.46;
 
-  var bloom = vec3f(0.0);
-  var weight = 0.0;
-  for (var ring = 0; ring < 3; ring = ring + 1) {
-    let radius = f32(ring * ring + 1) * mix(3.0, 9.0, f32(ring) / 2.0);
-    for (var directionIndex = 0; directionIndex < 8; directionIndex = directionIndex + 1) {
-      let angle = f32(directionIndex) * 0.78539816339 + f32(ring) * 0.31;
-      let offset = vec2f(cos(angle), sin(angle)) * pixel * radius;
-      let sampleColor = textureSample(sceneTexture, sceneSampler, uv + offset).rgb;
-      let brightness = smoothstep(0.72, 2.4, luminance(sampleColor));
-      let sampleWeight = mix(0.7, 0.24, f32(ring) / 2.0);
-      bloom += sampleColor * brightness * sampleWeight;
-      weight += sampleWeight;
-    }
-  }
-  bloom /= max(weight, 0.001);
-  color += bloom * 0.24;
+  let edge = inkEdge(input.uv, texel);
+  // Brush weight: the line thins and thickens along its length.
+  let weight = 0.55 + 0.45 * valueNoise2(pixel * 0.055);
+  let ink = smoothstep(0.055, 0.20, edge * weight);
+  color = mix(color, vec3f(0.043, 0.075, 0.129), ink * 0.78);
 
-  color *= u.frameExposure.y;
-  color = aces(color);
-  color = pow(color, vec3f(0.94));
-  color *= vec3f(0.96, 1.01, 1.055);
-  let gradedLuminance = luminance(color);
-  color = mix(vec3f(gradedLuminance), color, 1.17);
-  color += vec3f(-0.012, 0.018, 0.032) * smoothstep(0.08, 0.72, gradedLuminance);
+  // Paper: long fibres in the sheet plus a coarser mottle where the ink sat.
+  let fibre = valueNoise2(vec2f(pixel.x * 0.9, pixel.y * 0.07));
+  let mottle = valueNoise2(pixel * 0.012);
+  color *= 1.0 - (fibre - 0.5) * 0.055 - (mottle - 0.5) * 0.10;
+  color += (hash12(pixel + u.frameExposure.w) - 0.5) * 0.012;
 
-  let vignetteDistance = length((uv - 0.5) * vec2f(0.82, 1.0));
-  let vignette = 1.0 - smoothstep(0.38, 0.78, vignetteDistance) * 0.42;
-  color *= vignette;
-  let grain = hash12(input.position.xy + u.cameraTime.w * 61.0) - 0.5;
-  color += grain * (0.0065 / max(u.resolutionMotion.w, 0.75));
+  // The block never inks evenly to the edge of the sheet.
+  let centred = input.uv - 0.5;
+  let edgeFade = smoothstep(0.86, 0.36, length(centred * vec2f(1.06, 1.0)));
+  color = mix(vec3f(0.902, 0.862, 0.769), color, 0.62 + 0.38 * edgeFade);
+
   return vec4f(clamp(color, vec3f(0.0), vec3f(1.0)), 1.0);
 }

@@ -53,6 +53,10 @@ button {
   z-index: 0;
 }
 
+html.no-fade #ocean {
+  transition: none;
+}
+
 #experience.is-ready #ocean {
   opacity: 1;
 }
