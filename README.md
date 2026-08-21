@@ -1,24 +1,24 @@
-# Zen Garden
+# Tidal Atelier
 
-A calm, interactive WebGPU study for a short pause. The fragment shader creates slow, evolving ripples that respond to pointer movement. It is an original contemplative visual, not an ocean simulation or a recreation of another project.
+Tidal Atelier is a full-screen procedural WebGPU ocean meditation. The visible water is generated live in the browser without image textures, video, or external visual assets.
+
+The simulation combines a dual-cascade spectral ocean with a nonlinear shallow-water field. An HLL approximate Riemann solver advances colliding bores, while limiting steepness, Froude number, and flow convergence drive transported foam. A separate GPU compute pass emits ballistic spray from active breaking events. The scene is rendered through a multisampled HDR pipeline with Fresnel reflection, GGX highlights, Beer-Lambert absorption, crest scattering, bloom, and filmic tone mapping.
 
 ## Run locally
 
-Serve the directory with any static server, then open it in a WebGPU-capable browser.
-
 ```bash
-python3 -m http.server 4173
+npm install
+npm run dev
 ```
 
-Visit `http://localhost:4173`.
+Open `http://localhost:4173` in a WebGPU-capable browser.
 
 ## Interaction
 
-- Move a pointer or touch the canvas to leave a subtle ripple.
-- Use the intensity slider to change the wave energy.
-- Pause and resume the scene with the control button.
-- Hide the interface with the quiet-mode control or the `H` key; press `Escape` to restore it.
+- Move or drag the pointer across the ocean to disturb the water.
+- Press `Space` to pause or resume the simulation.
+- Reduced-motion preferences automatically lower animation intensity.
 
 ## Browser support
 
-The page uses WebGPU and gracefully shows a support message in browsers without it. Current Chromium browsers and recent Safari versions offer the best experience.
+Current Chromium browsers and recent Safari releases provide the best WebGPU support. Browsers without WebGPU receive a compatibility notice.

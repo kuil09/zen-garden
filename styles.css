@@ -1,102 +1,108 @@
 :root {
   color-scheme: dark;
-  --ink: #f2eadc;
-  --muted: rgba(242, 234, 220, 0.62);
-  --line: rgba(242, 234, 220, 0.26);
-  --accent: #ff8b4b;
-  --display: "Gowun Dodum", sans-serif;
-  --mono: "DM Mono", monospace;
+  --deep-ocean: #011027;
+  --foam: #eaf8ff;
 }
 
-* { box-sizing: border-box; }
+* {
+  box-sizing: border-box;
+}
 
-html, body { min-height: 100%; margin: 0; }
+html,
+body {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
 
 body {
-  overflow: hidden;
-  background: #111521;
-  color: var(--ink);
-  font-family: var(--display);
+  background: var(--deep-ocean);
+  color: var(--foam);
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
-main, canvas { width: 100%; height: 100%; }
+button {
+  font: inherit;
+}
 
-main { min-height: 100svh; position: relative; isolation: isolate; }
+#experience {
+  background: var(--deep-ocean);
+  height: 100%;
+  isolation: isolate;
+  min-height: 100svh;
+  overflow: hidden;
+  position: relative;
+  width: 100%;
+}
 
-canvas {
-  display: block;
+#ocean {
+  height: 100%;
   inset: 0;
   position: absolute;
-  z-index: -1;
+  width: 100%;
+}
+
+#ocean {
+  cursor: none;
+  display: block;
+  opacity: 0;
+  outline: none;
   touch-action: none;
+  transition: opacity 1800ms cubic-bezier(0.2, 0.75, 0.2, 1);
+  z-index: 0;
 }
 
-.masthead, footer, .controls, .intro { position: absolute; }
-
-.masthead {
-  align-items: center;
-  display: flex;
-  justify-content: space-between;
-  left: clamp(1.5rem, 4vw, 4.5rem);
-  right: clamp(1.5rem, 4vw, 4.5rem);
-  top: clamp(1.5rem, 4vw, 3.3rem);
+#experience.is-ready #ocean {
+  opacity: 1;
 }
 
-.wordmark {
-  color: var(--ink);
-  font-size: 1.2rem;
-  letter-spacing: -0.08em;
-  text-decoration: none;
-}
-.wordmark span { color: var(--accent); }
-
-.status, footer, .eyebrow, .mood, .sound-toggle {
-  font-family: var(--mono);
-  font-size: 0.62rem;
-  letter-spacing: 0.045em;
-}
-
-.status { align-items: center; color: var(--muted); display: flex; gap: 0.48rem; margin: 0; }
-.status i { background: #a5dc73; border-radius: 50%; box-shadow: 0 0 10px #a5dc73; height: 0.38rem; width: 0.38rem; }
-
-.intro { left: clamp(1.5rem, 12vw, 12rem); top: 50%; transform: translateY(-46%); }
-.eyebrow { color: #ffb48d; margin: 0 0 1.25rem; }
-h1 { font-size: clamp(2.2rem, 5.5vw, 5.3rem); font-weight: 400; letter-spacing: -0.095em; line-height: 1.25; margin: 0; }
-.lead { color: var(--muted); font-size: clamp(0.86rem, 1.3vw, 1rem); line-height: 1.95; margin: 1.45rem 0 0; }
-
-.controls { align-items: flex-start; bottom: clamp(4.4rem, 10vw, 7.5rem); display: flex; flex-direction: column; gap: 1.2rem; right: clamp(1.5rem, 5vw, 5.3rem); }
-button { appearance: none; }
-.sound-toggle { align-items: center; background: rgba(20, 26, 39, 0.28); border: 1px solid var(--line); border-radius: 99px; color: var(--ink); cursor: pointer; display: flex; gap: 0.65rem; padding: 0.72rem 0.94rem; transition: background 180ms ease, transform 180ms ease; }
-.sound-toggle:hover { background: rgba(242, 234, 220, 0.13); transform: translateY(-2px); }
-.sound-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
-.pause-icon { border-color: currentColor; border-style: solid; border-width: 0 2px; display: block; height: 0.7rem; width: 0.48rem; }
-.sound-toggle[aria-pressed="true"] .pause-icon { border: 0; border-bottom: 0.36rem solid transparent; border-left: 0.55rem solid currentColor; border-top: 0.36rem solid transparent; height: 0; width: 0; }
-
-.mood { align-items: center; color: var(--muted); display: flex; gap: 0.63rem; white-space: nowrap; }
-input[type="range"] { accent-color: var(--accent); cursor: ew-resize; width: 5rem; }
-.quiet-toggle { background: transparent; border: 0; color: var(--muted); cursor: pointer; font-family: var(--mono); font-size: .6rem; letter-spacing: .04em; padding: .2rem 0; text-decoration: underline; text-underline-offset: .25rem; }
-.quiet-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
-
-main.quiet .masthead, main.quiet .intro, main.quiet footer { opacity: 0; pointer-events: none; }
-.masthead, .intro, footer { transition: opacity 550ms ease; }
-
-footer { bottom: clamp(1.3rem, 3vw, 2.3rem); color: var(--muted); display: flex; justify-content: space-between; left: clamp(1.5rem, 4vw, 4.5rem); right: clamp(1.5rem, 4vw, 4.5rem); }
-footer p { margin: 0; }
-kbd { border: 1px solid var(--line); border-radius: 3px; color: var(--ink); font-family: var(--mono); font-size: .55rem; padding: .08rem .2rem; }
-
-.notice { background: #161d2d; border: 1px solid var(--line); border-radius: 1rem; left: 50%; max-width: 22rem; padding: 1.5rem; position: absolute; text-align: center; top: 50%; transform: translate(-50%, -50%); }
-.notice p:first-child { color: var(--ink); margin: 0 0 .6rem; }
-.notice p:last-child { color: var(--muted); font-size: .84rem; line-height: 1.7; margin: 0; }
-
-@media (max-width: 640px) {
-  .status { display: none; }
-  .intro { left: 1.5rem; right: 1.5rem; top: 44%; }
-  h1 { font-size: clamp(1.85rem, 8.2vw, 2.15rem); line-height: 1.35; }
-  .lead br { display: none; }
-  .lead { max-width: 16rem; }
-  .controls { bottom: 5.7rem; right: 1.5rem; }
-  footer p:first-child { max-width: 12rem; line-height: 1.6; }
-  footer { align-items: flex-end; }
+.notice {
+  backdrop-filter: blur(16px);
+  background: rgba(0, 13, 37, 0.72);
+  border: 1px solid rgba(227, 246, 255, 0.2);
+  border-radius: 1rem;
+  left: 50%;
+  margin: 0;
+  max-width: min(32rem, calc(100vw - 2rem));
+  padding: 1.4rem 1.5rem;
+  position: absolute;
+  text-align: center;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 3;
 }
 
-@media (prefers-reduced-motion: reduce) { .status i { box-shadow: none; } }
+.notice h1 {
+  font-size: 1rem;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  margin: 0 0 0.55rem;
+}
+
+.notice p,
+.noscript {
+  color: rgba(234, 248, 255, 0.72);
+  font-size: 0.78rem;
+  line-height: 1.65;
+  margin: 0;
+}
+
+.visually-hidden {
+  border: 0;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  padding: 0;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #ocean {
+    transition-duration: 0ms;
+  }
+}
