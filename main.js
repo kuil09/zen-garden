@@ -5,10 +5,12 @@ import breakersShader from './shaders/breakers.wgsl?raw';
 import sceneShader from './shaders/scene.wgsl?raw';
 import waveGeometryShader from './shaders/wave-geometry.wgsl?raw';
 import postShader from './shaders/post.wgsl?raw';
+import { toggleOceanSound, updateBreakerPosition, setListenerPosition } from './ocean-sound.js';
 
 const canvas = document.querySelector('#ocean');
 const experience = document.querySelector('#experience');
 const motionToggle = document.querySelector('#motionToggle');
+const soundToggle = document.querySelector('#soundToggle');
 const status = document.querySelector('#status');
 const notice = document.querySelector('#notice');
 
@@ -380,7 +382,7 @@ function updateBreakerAnchors(summary) {
   breakerSummary = summary;
   const components = extractBreakerComponents(summary);
   // Filter out breakers too close to the camera
-  const MIN_BREAKER_DIST_FROM_CAMERA = 30.0; // world units - increased from 18
+  const MIN_BREAKER_DIST_FROM_CAMERA = 45.0; // world units - increased from 30
   const cameraX = cameraWorldPos[0];
   const cameraZ = cameraWorldPos[2];
   const filteredComponents = components.filter((c) => {
@@ -1121,6 +1123,9 @@ async function initialize() {
 
   resize();
   experience.classList.add('is-ready');
+  // Reset timers right before starting render loop so first frame has elapsed ≈ 0
+  startTime = performance.now();
+  previousFrame = performance.now();
   frameRequest = requestAnimationFrame(draw);
 }
 
@@ -1138,7 +1143,6 @@ function setGrid(pass, grid) {
 }
 
 function draw(now) {
-  resize();
   const deltaMilliseconds = Math.min(50, now - previousFrame);
   previousFrame = now;
   adaptQuality(deltaMilliseconds);
@@ -1181,6 +1185,23 @@ function draw(now) {
   const camRight = normalize3(cross3([0, 1, 0], forward));
   const camUp = cross3(forward, camRight);
   const tanHalfY = Math.tan(fovRadians / 2);
+
+  // Update Web Audio listener position (camera)
+  setListenerPosition(
+    camera[0], camera[1], camera[2],
+    forward[0], forward[1], forward[2],
+    camUp[0], camUp[1], camUp[2]
+  );
+
+  // Update spatial sound to follow the main active breaker
+  const activeAnchor = breakerAnchors.find(a => a.active && a.envelope > 0.1);
+  if (activeAnchor) {
+    // Breaker position: center of the crest line, height from wave profile
+    const breakerX = activeAnchor.centerX;
+    const breakerY = activeAnchor.heightGain * activeAnchor.radius * 0.5; // approximate crest height
+    const breakerZ = activeAnchor.centerZ;
+    updateBreakerPosition(breakerX, breakerY, breakerZ, activeAnchor.dirX, activeAnchor.dirZ);
+  }
   const pixelRatio = canvas.clientWidth ? canvas.width / canvas.clientWidth : 1;
   const sunDirection = normalize3([0.31, 0.19, 0.93]);
   const uniforms = new Float32Array(UNIFORM_FLOATS);
@@ -1202,8 +1223,8 @@ function draw(now) {
   // print wants its breaker mid-frame, left of the mountain, and the prior is
   // where that preference lives — explicit, not disguised as physics.
   const breakerConfig = new Float32Array([
-    -3.0, 14.0, // focus (world XZ) - moved right from -6 to -3
-    22.0, 18.0, // ellipse radii - shrunk from 30,22 to cut left side
+    2.0, 16.0, // focus (world XZ) - moved further right, further forward
+    16.0, 14.0, // ellipse radii - shrunk from 22,18 to cut left side more
     camera[0], camera[2],
     6.0,        // minimum distance from camera
     0.02,       // score floor
@@ -1291,7 +1312,7 @@ function draw(now) {
   frameRequest = requestAnimationFrame(draw);
 }
 
-canvas.addEventListener('pointermove', trackPointer, { passive: true });
+// pointermove removed: no passive following
 canvas.addEventListener('pointerdown', (event) => {
   trackPointer(event);
   interactionEnergy = 1;
@@ -1301,6 +1322,7 @@ canvas.addEventListener('pointerleave', () => {
   pointer = [0.5, 0.5];
 });
 motionToggle.addEventListener('click', () => setMoving(!moving));
+soundToggle.addEventListener('click', toggleOceanSound);
 window.addEventListener('keydown', (event) => {
   if (event.code !== 'Space' || event.repeat) return;
   event.preventDefault();
