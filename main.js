@@ -1245,10 +1245,13 @@ function draw(now) {
   scenePass.setBindGroup(0, waveBindGroups[oceanBufferIndex]);
   setGrid(scenePass, waveGrid);
   scenePass.setPipeline(wavePipeline);
-  scenePass.drawIndexed(waveGrid.indexCount, WAVE_INSTANCES);
-  setGrid(scenePass, clawGrid);
-  scenePass.setPipeline(clawPipeline);
-  scenePass.drawIndexed(clawGrid.indexCount, WAVE_INSTANCES);
+  const waveInstanceCount = Math.min(WAVE_INSTANCES, breakerAnchors.length);
+  if (waveInstanceCount > 0) {
+    scenePass.drawIndexed(waveGrid.indexCount, waveInstanceCount);
+    setGrid(scenePass, clawGrid);
+    scenePass.setPipeline(clawPipeline);
+    scenePass.drawIndexed(clawGrid.indexCount, waveInstanceCount);
+  }
   scenePass.end();
 
   const postPass = encoder.beginRenderPass({

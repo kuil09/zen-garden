@@ -161,6 +161,12 @@ fn waveSample(uv: vec2f, params: WaveParams, time: f32) -> WaveSample {
 fn waveVertex(@location(0) uv: vec2f, @builtin(instance_index) instance: u32) -> SurfaceOutput {
   let params = waveParams(instance);
   let time = u.cameraTime.w;
+  // Dead instance guard: inactive slots have zero radius. Clip them out entirely.
+  if (params.radius <= 0.0 || params.heightGain <= 0.0) {
+    var discardOut: SurfaceOutput;
+    discardOut.position = vec4f(0.0, 0.0, 0.0, 0.0);
+    return discardOut;
+  }
   let here = waveSample(uv, params, time);
 
   let stepU = 1.0 / 320.0;
@@ -200,6 +206,11 @@ fn waveVertex(@location(0) uv: vec2f, @builtin(instance_index) instance: u32) ->
 fn clawVertex(@location(0) uv: vec2f, @builtin(instance_index) instance: u32) -> SurfaceOutput {
   let params = waveParams(instance);
   let time = u.cameraTime.w;
+  if (params.radius <= 0.0 || params.heightGain <= 0.0) {
+    var discardOut: SurfaceOutput;
+    discardOut.position = vec4f(0.0, 0.0, 0.0, 0.0);
+    return discardOut;
+  }
 
   let along = normalize(params.originB - params.originA);
   let span = length(params.originB - params.originA);
