@@ -20,6 +20,21 @@ const WAVE_LIP_V: f32 = 0.84;
 const WAVE_CLAW_BASE_V: f32 = 0.60;
 const WAVE_CLAW_REACH: f32 = 0.92;
 
+// Placement data, produced by shaders/breakers.wgsl + the CPU anchor manager.
+// One slot per wave-sheet instance; the CPU writes all slots every frame.
+// originA/originB carry the crest line endpoints (y = 0, on the sea plane);
+// radius and heightGain already include the spawn/despawn envelope.
+struct Breaker {
+  originA: vec4f,
+  originB: vec4f,
+  // heightGain, curlRate, curlWaves, phaseOffset
+  params: vec4f,
+  // crestPeak, crestWidth, thetaSpan, taper
+  shape: vec4f,
+  // throwGain, detailGain, active, seed
+  extras: vec4f,
+}
+
 struct WaveParams {
   originA: vec3f,
   originB: vec3f,
@@ -33,52 +48,27 @@ struct WaveParams {
   curlRate: f32,
   curlWaves: f32,
   detailGain: f32,
+  phaseOffset: f32,
 }
 
-fn waveParams(instance: u32) -> WaveParams {
-  // The great wave: the crest line runs from near-left to far-right so the tall
-  // end reads against the top-left of the plate and the crest recedes rightward.
-  var params: WaveParams;
-  params.originA = vec3f(-24.0, 0.0, 4.0);
-  params.originB = vec3f(3.0, 0.0, 31.0);
-  params.radius = 7.60;
-  params.heightGain = 1.0;
-  params.crestPeak = 0.30;
-  params.crestWidth = 0.55;
-  params.thetaSpan = 4.90;
-  params.taper = 0.40;
-  params.throwGain = 1.0;
-  params.curlRate = 0.42;
-  params.curlWaves = 3.4;
-  params.detailGain = 1.0;
+@group(0) @binding(2) var<storage, read> breakers: array<Breaker>;
 
-  if (instance == 1u) {
-    // Foreground counter-wave, lower right, smaller and less far through its break.
-    params.originA = vec3f(-38.0, 0.0, -8.0);
-    params.originB = vec3f(10.0, 0.0, 6.0);
-    params.radius = 1.75;
-    params.heightGain = 0.42;
-    params.crestPeak = 0.55;
-    params.crestWidth = 0.52;
-    params.thetaSpan = 3.45;
-    params.throwGain = 0.75;
-    params.curlRate = 0.61;
-    params.curlWaves = 8.2;
-    params.detailGain = 1.25;
-  } else if (instance == 2u) {
-    // Mid-distance swell that fills the gap between the two masses.
-    params.originA = vec3f(-6.0, 0.0, 26.0);
-    params.originB = vec3f(48.0, 0.0, 50.0);
-    params.radius = 2.60;
-    params.heightGain = 0.74;
-    params.crestPeak = 0.40;
-    params.crestWidth = 0.58;
-    params.thetaSpan = 2.95;
-    params.throwGain = 0.55;
-    params.curlRate = 0.33;
-    params.curlWaves = 6.9;
-    params.detailGain = 0.7;
-  }
+fn waveParams(instance: u32) -> WaveParams {
+  let placed = breakers[instance];
+  var params: WaveParams;
+  params.originA = placed.originA.xyz;
+  params.originB = placed.originB.xyz;
+  params.radius = placed.originB.w * placed.extras.z;
+  params.heightGain = placed.params.x;
+  params.crestPeak = placed.shape.x;
+  params.crestWidth = placed.shape.y;
+  params.thetaSpan = placed.shape.z;
+  params.taper = placed.shape.w;
+  params.throwGain = placed.extras.x;
+  params.curlRate = placed.params.y;
+  params.curlWaves = placed.params.z;
+  params.detailGain = placed.extras.y;
+  params.phaseOffset = placed.params.w;
   return params;
 }
 
@@ -113,7 +103,7 @@ fn waveProfile(v: f32, curl: f32, params: WaveParams) -> vec2f {
 // How far through the break each slice of the crest is. Travelling this phase
 // along u staggers the claws the way Hokusai stacks them, and it loops cleanly.
 fn waveCurl(u: f32, params: WaveParams, time: f32) -> f32 {
-  let phase = u * params.curlWaves - time * params.curlRate;
+  let phase = u * params.curlWaves - time * params.curlRate + params.phaseOffset;
   let staggered = 0.5 + 0.5 * sin(phase);
   let secondary = 0.5 + 0.5 * sin(phase * 0.41 + 1.7);
   return clamp(0.34 + 0.52 * staggered + 0.20 * secondary, 0.0, 1.0);

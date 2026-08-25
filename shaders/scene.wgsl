@@ -1,14 +1,17 @@
 const GRID_SIZE: i32 = 256;
 const DOMAIN_SIZE: f32 = 84.0;
-const PI: f32 = 3.141592653589793;
 
 struct Uniforms {
   viewProjection: mat4x4f,
   cameraTime: vec4f,
   resolutionMotion: vec4f,
-  pointerEnergy: vec4f,
+  flowFocus: vec4f,
   frameExposure: vec4f,
   sunDirection: vec4f,
+  camRight: vec4f,
+  camUp: vec4f,
+  camForward: vec4f,
+  mountain: vec4f,
 }
 
 struct OceanPoint {
@@ -121,66 +124,6 @@ fn oceanVertex(@location(0) uv: vec2f) -> SurfaceOutput {
   output.sheetCoordinates = uv;
   output.sheetWeight = 0.0;
   return output;
-}
-
-fn skyRadiance(directionInput: vec3f) -> vec3f {
-  let direction = normalize(directionInput);
-  let elevation = saturate(direction.y * 0.5 + 0.5);
-  let horizon = pow(saturate(1.0 - abs(direction.y)), 7.0);
-  let zenith = pow(saturate(direction.y), 0.48);
-  var color = mix(vec3f(0.002, 0.014, 0.074), vec3f(0.022, 0.145, 0.43), elevation);
-  color += vec3f(0.008, 0.075, 0.25) * zenith;
-  color += vec3f(0.072, 0.35, 0.59) * horizon * 0.76;
-
-  let lightDirection = normalize(u.sunDirection.xyz);
-  let sunCosine = max(0.0, dot(direction, lightDirection));
-  let sun = pow(sunCosine, 1050.0);
-  let innerHalo = pow(sunCosine, 76.0);
-  let outerHalo = pow(sunCosine, 11.0);
-  color += vec3f(4.2, 2.35, 0.96) * sun;
-  color += vec3f(0.66, 0.25, 0.055) * innerHalo * 0.48;
-  color += vec3f(0.18, 0.08, 0.026) * outerHalo * 0.24;
-  return color;
-}
-
-fn dielectricFresnel(cosine: f32) -> f32 {
-  let eta = 1.0 / 1.333;
-  let transmittedSineSquared = eta * eta * max(0.0, 1.0 - cosine * cosine);
-  if (transmittedSineSquared >= 1.0) {
-    return 1.0;
-  }
-  let transmittedCosine = sqrt(max(0.0, 1.0 - transmittedSineSquared));
-  let parallel = (cosine - 1.333 * transmittedCosine) / max(cosine + 1.333 * transmittedCosine, 0.0001);
-  let perpendicular = (transmittedCosine - 1.333 * cosine) / max(transmittedCosine + 1.333 * cosine, 0.0001);
-  return 0.5 * (parallel * parallel + perpendicular * perpendicular);
-}
-
-fn distributionGGX(noh: f32, roughness: f32) -> f32 {
-  let alpha = roughness * roughness;
-  let alphaSquared = alpha * alpha;
-  let denominator = noh * noh * (alphaSquared - 1.0) + 1.0;
-  return alphaSquared / max(PI * denominator * denominator, 0.0001);
-}
-
-fn visibilitySmith(nov: f32, nol: f32, roughness: f32) -> f32 {
-  let r = roughness + 1.0;
-  let k = r * r * 0.125;
-  return (nov / mix(nov, 1.0, k)) * (nol / mix(nol, 1.0, k));
-}
-
-fn windGlitter(normal: vec3f, viewDirection: vec3f, lightDirection: vec3f) -> f32 {
-  let halfVector = normalize(viewDirection + lightDirection);
-  let ndh = max(dot(normal, halfVector), 0.001);
-  let wind = normalize(vec3f(0.73, 0.0, -0.68));
-  let tangent = normalize(wind - normal * dot(wind, normal));
-  let bitangent = normalize(cross(normal, tangent));
-  let along = dot(halfVector, tangent) / ndh;
-  let across = dot(halfVector, bitangent) / ndh;
-  let alongVariance = 0.041;
-  let acrossVariance = 0.024;
-  let slopePdf = exp(-0.5 * (along * along / alongVariance + across * across / acrossVariance))
-    / (2.0 * PI * sqrt(alongVariance * acrossVariance));
-  return min(slopePdf / max(ndh * ndh * ndh * ndh, 0.001), 18.0);
 }
 
 fn microNormal(worldPosition: vec3f, normal: vec3f, foam: f32) -> vec3f {
@@ -387,40 +330,128 @@ fn backgroundVertex(@builtin(vertex_index) index: u32) -> BackgroundOutput {
   return output;
 }
 
-fn fujiSilhouette(point: vec2f) -> f32 {
-  // Fuji is a truncated cone: concave flanks running down from a flat summit.
-  // The base runs well below the horizon, where the sea covers it.
-  let peak = vec2f(0.66, -0.118);
-  let local = point - peak;
-  let shoulder = max(0.0, abs(local.x) - 0.020);
-  let flank = -pow(shoulder, 0.78) * 0.46;
-  return step(local.y, flank);
+// Ray through this background pixel, built from the camera basis. NDC x is
+// right, y is up; camRight.w / camUp.w carry tan(halfFov).
+fn backgroundRay(ndc: vec2f) -> vec3f {
+  return normalize(u.camForward.xyz
+    + u.camRight.xyz * (ndc.x * u.camRight.w)
+    + u.camUp.xyz * (ndc.y * u.camUp.w));
+}
+
+// The mountain stands at a fixed world position, so the ray is intersected
+// with its radial profile instead of drawing it in screen space. Profile:
+// concave flanks rising to a flat, slightly dished summit. The base sits below
+// sea level, where the ocean mesh covers it.
+fn mountainHeight(radius: f32) -> f32 {
+  let flank = pow(saturate(1.0 - radius / u.mountain.w), 0.55);
+  let crater = 1.0 - 0.12 * smoothstep(u.mountain.w * 0.10, 0.0, radius);
+  return flank * u.mountain.z * crater;
+}
+
+// First intersection of the ray with the mountain profile, as a ray parameter
+// t (world point = origin + t·direction), or -1. Solved in the vertical plane
+// through the mountain centre: the chord the ray cuts across the base disc is
+// marched, then the crossing is bisected. Cheap, and only runs on background
+// pixels.
+fn mountainHit(origin: vec3f, direction: vec3f) -> f32 {
+  let toCentre = u.mountain.xz - origin.xz;
+  let dirLength = length(direction.xz);
+  if (dirLength < 1e-4) {
+    return -1.0;
+  }
+  let dirFlat = direction.xz / dirLength;
+  let along = dot(toCentre, dirFlat);
+  let perpendicular = length(toCentre - dirFlat * along);
+  if (perpendicular >= u.mountain.w) {
+    return -1.0;
+  }
+  let halfChord = sqrt(u.mountain.w * u.mountain.w - perpendicular * perpendicular);
+
+  var entry = -halfChord;
+  var exit = halfChord;
+  let behind = -along;
+  if (entry < behind) {
+    entry = behind;
+  }
+  if (exit <= entry) {
+    return -1.0;
+  }
+
+  let steps = 40i;
+  let stride = (exit - entry) / f32(steps);
+  var previous = entry;
+  var crossed = false;
+  for (var i = 1; i <= steps; i = i + 1) {
+    let s = entry + stride * f32(i);
+    let t = (along + s) / dirLength;
+    let rayHeight = origin.y + t * direction.y;
+    let ground = mountainHeight(sqrt(perpendicular * perpendicular + s * s));
+    if (rayHeight <= ground) {
+      exit = s;
+      crossed = true;
+      break;
+    }
+    previous = s;
+  }
+  if (!crossed) {
+    return -1.0;
+  }
+  for (var i = 0; i < 7; i = i + 1) {
+    let middle = (previous + exit) * 0.5;
+    let t = (along + middle) / dirLength;
+    let rayHeight = origin.y + t * direction.y;
+    let ground = mountainHeight(sqrt(perpendicular * perpendicular + middle * middle));
+    if (rayHeight <= ground) {
+      exit = middle;
+    } else {
+      previous = middle;
+    }
+  }
+  return (along + exit) / dirLength;
 }
 
 @fragment
 fn backgroundFragment(input: BackgroundOutput) -> @location(0) vec4f {
   let uv = input.position.xy / u.resolutionMotion.xy;
-  let aspect = u.resolutionMotion.x / u.resolutionMotion.y;
-  var point = vec2f((uv.x - 0.5) * aspect * 2.0, (0.5 - uv.y) * 2.0);
-  point += (u.pointerEnergy.xy - 0.5) * vec2f(0.030, -0.018);
+  let ndc = vec2f((uv.x - 0.5) * 2.0, (0.5 - uv.y) * 2.0);
+  let direction = backgroundRay(ndc);
 
-  // Banded sky: aged paper at the horizon, grey-blue overhead. Banding is the
-  // point — a print has no continuous gradient.
-  let height = saturate(point.y * 0.40 + 0.16);
-  let band = floor(height * 5.0) / 5.0;
+  // Banded sky, keyed off the ray elevation so the bands sit at the horizon
+  // whatever the camera does. Banding is the point — a print has no
+  // continuous gradient.
+  let bandHeight = saturate(direction.y * 1.9 + 0.16);
+  let band = floor(bandHeight * 5.0) / 5.0;
   var color = mix(INK_PAPER, INK_MIST, smoothstep(0.30, 1.0, band) * 0.40);
 
-  // Plate clouds: flat masses with a hard edge, not volumetric fbm.
+  // Plate clouds: flat masses with a hard edge, not volumetric fbm. Anchored
+  // to the ray bearing so they hold still as the camera drifts.
   let time = u.cameraTime.w * u.resolutionMotion.z;
-  let cloudCoordinates = point * vec2f(1.15, 2.60) + vec2f(time * 0.006, 0.0);
+  let bearing = atan2(direction.x, direction.z);
+  let cloudCoordinates = vec2f(bearing * 1.9, direction.y * 4.6) + vec2f(time * 0.006, 0.0);
   let cloudShape = fbm(cloudCoordinates + vec2f(fbm(cloudCoordinates * 0.5) * 1.4, 0.0));
-  let cloudMask = step(0.62, cloudShape) * smoothstep(0.02, 0.30, point.y);
+  let cloudMask = step(0.62, cloudShape) * smoothstep(0.005, 0.10, direction.y);
   color = mix(color, INK_PAPER, cloudMask * 0.72);
 
-  let mountain = fujiSilhouette(point);
-  let snow = mountain * step(-0.034, point.y + 0.118);
-  color = mix(color, INK_MIST, mountain * 0.95);
-  color = mix(color, INK_PAPER, snow * 0.90);
+  let chord = mountainHit(u.cameraTime.xyz, direction);
+  if (chord >= 0.0) {
+    let hit = u.cameraTime.xyz + direction * chord;
+    let radius = length(hit.xz - u.mountain.xz);
+    let heightFraction = saturate(hit.y / max(u.mountain.z, 0.001));
+
+    var mountainColor = INK_MIST;
+    mountainColor = mix(mountainColor, INK_PALE, smoothstep(0.30, 0.0, heightFraction) * 0.35);
+    // Snow sits on the upper flank with a wind-scuffed boundary.
+    let bearingHit = atan2(hit.x - u.mountain.x, hit.z - u.mountain.z);
+    let snowLine = 0.50
+      + 0.05 * sin(bearingHit * 7.0 + 1.3)
+      + (fbm(hit.xz * 0.45) - 0.5) * 0.14;
+    let snow = step(snowLine, heightFraction);
+    color = mix(color, mountainColor, 1.0);
+    color = mix(color, INK_PAPER, snow * 0.90);
+    // The dished summit reads as one carved line under the rim.
+    let crater = smoothstep(u.mountain.w * 0.09, 0.0, radius) * step(0.86, heightFraction);
+    color = mix(color, INK_PALE, crater * 0.30);
+  }
 
   return vec4f(max(color, vec3f(0.0)), 1.0);
 }
