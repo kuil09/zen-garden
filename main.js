@@ -78,6 +78,8 @@ let surfaceBindGroups;
 let waveBindGroups;
 let postBindGroup;
 let oceanGrid;
+// Camera world position for breaker spawn filtering
+let cameraWorldPos = [0.0, 0.0, 0.0];
 let waveGrid;
 let wavePipeline;
 let clawGrid;
@@ -377,11 +379,20 @@ function extractBreakerComponents(summary) {
 function updateBreakerAnchors(summary) {
   breakerSummary = summary;
   const components = extractBreakerComponents(summary);
+  // Filter out breakers too close to the camera
+  const MIN_BREAKER_DIST_FROM_CAMERA = 18.0; // world units
+  const cameraX = cameraWorldPos[0];
+  const cameraZ = cameraWorldPos[2];
+  const filteredComponents = components.filter((c) => {
+    const dx = c.centerX - cameraX;
+    const dz = c.centerZ - cameraZ;
+    return dx * dx + dz * dz >= MIN_BREAKER_DIST_FROM_CAMERA * MIN_BREAKER_DIST_FROM_CAMERA;
+  });
   for (const anchor of breakerAnchors) {
     anchor.claimed = false;
     anchor.component = null;
   }
-  for (const component of components) {
+  for (const component of filteredComponents) {
     let target = null;
     let bestDistance = BREAKER_MATCH_RADIUS;
     for (const anchor of breakerAnchors) {
@@ -1151,6 +1162,9 @@ function draw(now) {
     2.0 + (0.5 - smoothPointer[1]) * 0.22 + Math.sin(elapsed * 0.09 * motionSpeed) * 0.075,
     -32.0,
   ];
+  cameraWorldPos[0] = camera[0];
+  cameraWorldPos[1] = camera[1];
+  cameraWorldPos[2] = camera[2];
   const target = [
     -6.0 + (smoothPointer[0] - 0.5) * 0.18,
     8.5 + (0.5 - smoothPointer[1]) * 0.14,
