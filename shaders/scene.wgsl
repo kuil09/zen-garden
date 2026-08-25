@@ -238,13 +238,15 @@ fn surfaceFragment(input: SurfaceOutput) -> @location(0) vec4f {
     let tip = saturate(height / max(claw.x, 0.001));
     // A finger of foam against a paper sky is invisible unless it is drawn. Give
     // it the carved outline and the pale underside that the print uses.
-    // Bright white foam claws for dramatic breaking waves.
+    // Hokusai: pure white claws with razor-sharp carved outlines.
     var clawColor = INK_FOAM;
-    clawColor = mix(INK_FOAM, clawColor, smoothstep(0.02, 0.40, tip));
-    clawColor = mix(clawColor, INK_PAPER, smoothstep(0.35, 0.85, tip) * 0.9);
-    clawColor = mix(clawColor, INK_FOAM, smoothstep(0.60, 0.96, claw.y) * 0.9);
-    let outline = max(smoothstep(0.945, 1.0, claw.y), smoothstep(0.965, 1.0, tip));
-    clawColor = mix(clawColor, INK_MID, outline * 0.50);
+    clawColor = mix(INK_FOAM, clawColor, smoothstep(0.01, 0.35, tip));
+    clawColor = mix(clawColor, INK_PAPER, smoothstep(0.30, 0.80, tip) * 0.7);
+    clawColor = mix(clawColor, INK_FOAM, smoothstep(0.55, 0.95, claw.y) * 0.95);
+    let outline = max(smoothstep(0.95, 1.0, claw.y), smoothstep(0.97, 1.0, tip));
+    clawColor = mix(clawColor, INK_MID, outline * 0.35);
+    // Extra bright tip highlight
+    clawColor = mix(clawColor, vec3f(1.0), smoothstep(0.92, 1.0, tip) * 0.15);
     return vec4f(clawColor, 1.0);
   }
 
@@ -284,30 +286,30 @@ fn surfaceFragment(input: SurfaceOutput) -> @location(0) vec4f {
   color = mix(color, vec3f(0.353, 0.612, 0.596), crest * 0.38);
 
   // Foam is unprinted paper: a hard edge, never a gradient.
-  // More aggressive foam for dramatic breaking waves.
+  // Hokusai-style aggressive foam: sharp carved edges, bright white.
   var foamMask = 0.0;
   var foamEdge = 0.0;
   if (onSheet) {
     let sheet = input.sheetCoordinates;
     // Inside the barrel the aerated water lies in bands that follow the crest,
     // so the boundary wanders along u rather than breaking into vertical spikes.
-    let reach = (0.03 + 0.18 * input.foam) * smoothstep(0.15, 0.75, input.foam);
-    let band = fbm(vec2f(sheet.x * 3.4, 1.7)) - 0.5;
-    let claws = clawField(sheet, reach * 0.85, 4.5, 4, 3.5).x;
-    let boundary = WAVE_LIP_V - reach - band * 0.25 - claws;
+    let reach = (0.04 + 0.25 * input.foam) * smoothstep(0.10, 0.80, input.foam);
+    let band = fbm(vec2f(sheet.x * 4.0, 2.0)) - 0.5;
+    let claws = clawField(sheet, reach * 1.1, 5.0, 5, 4.0).x;
+    let boundary = WAVE_LIP_V - reach - band * 0.30 - claws;
     foamMask = step(boundary, sheet.y);
-    foamEdge = step(boundary - 0.07, sheet.y);
+    foamEdge = step(boundary - 0.09, sheet.y);
     // The tongue is solid white water once the wave is well into its break.
-    foamMask = max(foamMask, step(0.90, sheet.y));
+    foamMask = max(foamMask, step(0.88, sheet.y));
   } else {
-    let breakup = fbm(input.fieldCoordinates * 1.35);
-    let fine = fbm(input.fieldCoordinates * 5.8 + vec2f(11.3, -4.1));
-    let porosity = breakup * 0.62 + fine * 0.38;
-    foamMask = step(0.5, input.foam * 1.9 - porosity * 0.70 + 0.10);
-    foamEdge = step(0.5, input.foam * 1.9 - porosity * 0.70 - 0.02);
+    let breakup = fbm(input.fieldCoordinates * 1.5);
+    let fine = fbm(input.fieldCoordinates * 6.5 + vec2f(11.3, -4.1));
+    let porosity = breakup * 0.65 + fine * 0.35;
+    foamMask = step(0.4, input.foam * 2.3 - porosity * 0.75 + 0.12);
+    foamEdge = step(0.4, input.foam * 2.3 - porosity * 0.75 - 0.01);
   }
-  color = mix(color, INK_FOAM, foamEdge * 0.9);
-  color = mix(color, INK_PAPER, foamMask * 1.1);
+  color = mix(color, INK_FOAM, foamEdge * 1.0);
+  color = mix(color, INK_PAPER, foamMask * 1.2);
 
   let distance = length(u.cameraTime.xyz - input.worldPosition);
   color = mix(color, INK_PALE, smoothstep(70.0, 220.0, distance) * 0.55);

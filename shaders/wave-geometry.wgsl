@@ -8,17 +8,17 @@
 
 // Profile constants, in units of the curl radius. Trough sits at y = 0 so the
 // wave meets the surrounding sea; the crest tops out near y = 2.9.
-const WAVE_BARREL_Y: f32 = 2.80;
-const WAVE_CREST_RADIUS: f32 = 2.20;
-const WAVE_TROUGH_X: f32 = 0.30;
+const WAVE_BARREL_Y: f32 = 4.50;
+const WAVE_CREST_RADIUS: f32 = 3.50;
+const WAVE_TROUGH_X: f32 = 0.25;
 const WAVE_TROUGH_Y: f32 = 0.0;
-const WAVE_SKIRT_END: f32 = 0.10;
-const WAVE_CREST_V: f32 = 0.58;
+const WAVE_SKIRT_END: f32 = 0.08;
+const WAVE_CREST_V: f32 = 0.48;
 // Where aerated water starts on the profile; the claws drag this line downward.
-const WAVE_LIP_V: f32 = 0.84;
+const WAVE_LIP_V: f32 = 0.78;
 // Where the claw strip is rooted on the profile: the outer top of the lip.
-const WAVE_CLAW_BASE_V: f32 = 0.60;
-const WAVE_CLAW_REACH: f32 = 0.92;
+const WAVE_CLAW_BASE_V: f32 = 0.55;
+const WAVE_CLAW_REACH: f32 = 1.80;
 
 // Placement data, produced by shaders/breakers.wgsl + the CPU anchor manager.
 // One slot per wave-sheet instance; the CPU writes all slots every frame.
@@ -95,8 +95,8 @@ fn waveProfile(v: f32, curl: f32, params: WaveParams) -> vec2f {
   let t = (v - WAVE_CREST_V) / (1.0 - WAVE_CREST_V);
   let theta = params.thetaSpan * mix(0.42, 1.0, curl) * t;
   let radius = WAVE_CREST_RADIUS * (1.0 - params.taper * pow(t, 1.10));
-  let throwOut = vec2f(3.20, -3.80) * params.throwGain * curl
-    * smoothstep(0.35, 1.0, t);
+  let throwOut = vec2f(5.50, -5.50) * params.throwGain * curl
+    * smoothstep(0.25, 1.0, t);
   return vec2f(0.0, WAVE_BARREL_Y) + radius * vec2f(sin(theta), cos(theta)) + throwOut;
 }
 
@@ -112,11 +112,11 @@ fn waveCurl(u: f32, params: WaveParams, time: f32) -> f32 {
 // Deliberately asymmetric: the wave rears up over a short stretch of crest and
 // then trails away. A symmetric bump reads as a hill, not as a wave about to fall.
 fn waveCrestScale(u: f32, params: WaveParams) -> f32 {
-  let rise = smoothstep(0.02, params.crestPeak * 0.85, u);
-  let hold = params.crestPeak + params.crestWidth * 0.45;
+  let rise = smoothstep(0.01, params.crestPeak * 0.75, u);
+  let hold = params.crestPeak + params.crestWidth * 0.35;
   let decay = exp(-max(0.0, u - hold) / params.crestWidth);
-  let shoulder = 0.16 + 0.84 * decay;
-  let ends = smoothstep(0.0, 0.10, 1.0 - u);
+  let shoulder = 0.10 + 0.90 * decay;
+  let ends = smoothstep(0.0, 0.08, 1.0 - u);
   return params.heightGain * rise * shoulder * ends;
 }
 

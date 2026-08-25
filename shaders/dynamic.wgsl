@@ -229,10 +229,10 @@ fn evolveDynamicWater(@builtin(global_invocation_id) id: vec3u) {
 
   // Solve dF/dt + u·grad(F) = S(1-F) - F/tau with mild diffusion.
   let backtrace = vec2f(id.xy) - flow * dt / CELL_SIZE;
-  var foam = bilinearFoam(backtrace) * exp(-dt / 3.4);
-  foam += (1.0 - foam) * breakerSource * dt * 3.50;
+  var foam = bilinearFoam(backtrace) * exp(-dt / 5.0);
+  foam += (1.0 - foam) * breakerSource * dt * 4.80;
   let neighborFoam = (west.foam + east.foam + south.foam + north.foam) * 0.25;
-  foam = mix(foam, neighborFoam, min(0.16, dt * 6.0));
+  foam = mix(foam, neighborFoam, min(0.12, dt * 5.0));
 
   let edgeDistance = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y));
   let sourceMask = max(farBand, sideBand);

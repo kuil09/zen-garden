@@ -109,18 +109,18 @@ const breakerAnchors = Array.from({ length: 3 }, (_, index) => ({
   centerZ: 0,
   dirX: 1,
   dirZ: 0,
-  extent: 18,
-  radius: 6,
-  heightGain: 1.8,
-  curlRate: 0.55,
-  curlWaves: 4.5,
+  extent: 22,
+  radius: 8,
+  heightGain: 2.5,
+  curlRate: 0.70,
+  curlWaves: 5.5,
   phaseOffset: index * 2.4,
-  crestPeak: 0.5,
-  crestWidth: 0.65,
-  thetaSpan: 4.2,
-  taper: 0.45,
-  throwGain: 1.4,
-  detailGain: 1.2,
+  crestPeak: 0.55,
+  crestWidth: 0.55,
+  thetaSpan: 5.0,
+  taper: 0.5,
+  throwGain: 1.8,
+  detailGain: 1.5,
   envelope: 0,
   targetEnvelope: 0,
   claimed: false,
@@ -631,9 +631,9 @@ function createInitialDynamicState() {
     // Main breaker: placed at the Hokusai composition focus so it naturally
     // breaks within the frame. Higher amplitude and tighter width give a
     // plunging crest that the breaker sheets can ride.
-    { direction: normalize2([0.20, -0.98]), center: [-10.5, 14.0], amplitude: 3.50, modulation: 0.12, phase: 0.6 },
-    { direction: normalize2([-0.55, 0.83]), center: [7, 3], amplitude: 1.50, modulation: 0.15, phase: 2.0 },
-    { direction: normalize2([0.90, -0.44]), center: [-18, 27], amplitude: 1.00, modulation: 0.10, phase: -1.1 },
+    { direction: normalize2([0.20, -0.98]), center: [-10.5, 14.0], amplitude: 4.20, modulation: 0.10, phase: 0.6 },
+    { direction: normalize2([-0.55, 0.83]), center: [7, 3], amplitude: 1.80, modulation: 0.12, phase: 2.0 },
+    { direction: normalize2([0.90, -0.44]), center: [-18, 27], amplitude: 1.20, modulation: 0.08, phase: -1.1 },
   ];
 
   for (let y = 0; y < SIMULATION_SIZE; y += 1) {
@@ -1178,7 +1178,7 @@ function draw(now) {
   device.queue.writeBuffer(uniformBuffer, 0, uniforms);
   writeEvolveParams(elapsed * motionSpeed, deltaSeconds);
   writeDynamicParams(dynamicTime, dynamicDelta / DYNAMIC_SUBSTEPS, 0);
-  device.queue.writeBuffer(resolveParamsBuffer, 0, new Float32Array([dynamicTime, dynamicDelta, 0.72, frameIndex]));
+  device.queue.writeBuffer(resolveParamsBuffer, 0, new Float32Array([dynamicTime, dynamicDelta, 0.45, frameIndex]));
   // Breaker detection configuration. The focus is the composition prior: the
   // print wants its breaker mid-frame, left of the mountain, and the prior is
   // where that preference lives — explicit, not disguised as physics.
