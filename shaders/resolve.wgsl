@@ -105,7 +105,7 @@ fn resolveOcean(@builtin(global_invocation_id) id: vec3u) {
   let dynamicBreaking = smoothstep(0.34, 0.74, length(gradientDynamic))
     * smoothstep(0.18, 0.78, dynamicFroude);
   let foamSource = clamp(
-    compressionFoam * 0.22 + crestFoam * 0.08 + physicalFoam * 0.82 + dynamicBreaking * 0.38,
+    compressionFoam * 0.45 + crestFoam * 0.22 + physicalFoam * 1.15 + dynamicBreaking * 0.70,
     0.0,
     1.0
   );
