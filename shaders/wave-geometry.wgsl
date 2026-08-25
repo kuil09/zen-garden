@@ -202,6 +202,11 @@ fn waveVertex(@location(0) uv: vec2f, @builtin(instance_index) instance: u32) ->
 
   var output: SurfaceOutput;
   output.position = u.viewProjection * vec4f(here.position, 1.0);
+  // Frustum cull: cull vertices far left of view (NDC x < -1.1 = slightly outside left edge)
+  if (output.position.x < -1.1 * output.position.w) {
+    output.position = vec4f(0.0, 0.0, 0.0, 0.0);
+    return output;
+  }
   output.worldPosition = here.position;
   output.normal = normal;
   output.fieldCoordinates = here.position.xz;
@@ -262,6 +267,11 @@ fn clawVertex(@location(0) uv: vec2f, @builtin(instance_index) instance: u32) ->
 
   var output: SurfaceOutput;
   output.position = u.viewProjection * vec4f(position, 1.0);
+  // Frustum cull: cull vertices far left of view
+  if (output.position.x < -1.1 * output.position.w) {
+    output.position = vec4f(0.0, 0.0, 0.0, 0.0);
+    return output;
+  }
   output.worldPosition = position;
   output.normal = normalize(vec3f(axis.x * outward.x, outward.y, axis.z * outward.x));
   output.fieldCoordinates = position.xz;
