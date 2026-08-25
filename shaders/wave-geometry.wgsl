@@ -8,8 +8,8 @@
 
 // Profile constants, in units of the curl radius. Trough sits at y = 0 so the
 // wave meets the surrounding sea; the crest tops out near y = 2.9.
-const WAVE_BARREL_Y: f32 = 1.45;
-const WAVE_CREST_RADIUS: f32 = 1.40;
+const WAVE_BARREL_Y: f32 = 2.80;
+const WAVE_CREST_RADIUS: f32 = 2.20;
 const WAVE_TROUGH_X: f32 = 0.30;
 const WAVE_TROUGH_Y: f32 = 0.0;
 const WAVE_SKIRT_END: f32 = 0.10;
@@ -95,8 +95,8 @@ fn waveProfile(v: f32, curl: f32, params: WaveParams) -> vec2f {
   let t = (v - WAVE_CREST_V) / (1.0 - WAVE_CREST_V);
   let theta = params.thetaSpan * mix(0.42, 1.0, curl) * t;
   let radius = WAVE_CREST_RADIUS * (1.0 - params.taper * pow(t, 1.10));
-  let throwOut = vec2f(1.85, -1.95) * params.throwGain * curl
-    * smoothstep(0.40, 1.0, t);
+  let throwOut = vec2f(3.20, -3.80) * params.throwGain * curl
+    * smoothstep(0.35, 1.0, t);
   return vec2f(0.0, WAVE_BARREL_Y) + radius * vec2f(sin(theta), cos(theta)) + throwOut;
 }
 
@@ -225,10 +225,10 @@ fn clawVertex(@location(0) uv: vec2f, @builtin(instance_index) instance: u32) ->
   // Up and forward, following the direction the lip is already throwing water.
   let outward = normalize(root - vec2f(0.0, WAVE_BARREL_Y) + vec2f(0.72, 0.30));
 
-  let reach = WAVE_CLAW_REACH * mix(0.45, 1.0, curl);
+  let reach = WAVE_CLAW_REACH * mix(0.5, 1.0, curl);
   let extent = uv.y * reach;
   // Fingers fan apart slightly as they rise, the way thrown water separates.
-  let fan = (hash11(floor(uv.x * 5.2) + 3.7) - 0.5) * 0.55 * uv.y;
+  let fan = (hash11(floor(uv.x * 5.2) + 3.7) - 0.5) * 0.75 * uv.y;
 
   var position = params.originA
     + along * (uv.x * span + fan * scale)

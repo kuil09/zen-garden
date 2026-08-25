@@ -23,7 +23,7 @@ const WAVE_INSTANCES = 3;
 const CLAW_COLUMNS = 1024;
 const CLAW_ROWS = 40;
 const DYNAMIC_SUBSTEPS = 4;
-const UNIFORM_FLOATS = 52;
+const UNIFORM_FLOATS = 48;
 const UNIFORM_SIZE = UNIFORM_FLOATS * Float32Array.BYTES_PER_ELEMENT;
 const COMPUTE_PARAMS_SIZE = 32;
 const RESOLVE_PARAMS_SIZE = 16;
@@ -42,9 +42,6 @@ const READBACK_INTERVAL = 20;
 const BREAKER_MATCH_RADIUS = 26;
 const BREAKER_ENVELOPE_SECONDS = 2.2;
 
-// The mountain is a world object now: a fixed silhouette the background rays
-// intersect. Sizing keeps it small and right of the wave, as in the print.
-const MOUNTAIN = { centerX: 7.0, centerZ: 100.0, peakHeight: 15.0, baseRadius: 30.0 };
 const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 let device;
@@ -113,17 +110,17 @@ const breakerAnchors = Array.from({ length: 3 }, (_, index) => ({
   dirX: 1,
   dirZ: 0,
   extent: 18,
-  radius: 4,
-  heightGain: 1,
-  curlRate: 0.42,
-  curlWaves: 3.4,
+  radius: 6,
+  heightGain: 1.8,
+  curlRate: 0.55,
+  curlWaves: 4.5,
   phaseOffset: index * 2.4,
-  crestPeak: 0.4,
-  crestWidth: 0.55,
-  thetaSpan: 3.5,
-  taper: 0.4,
-  throwGain: 0.8,
-  detailGain: 1.0,
+  crestPeak: 0.5,
+  crestWidth: 0.65,
+  thetaSpan: 4.2,
+  taper: 0.45,
+  throwGain: 1.4,
+  detailGain: 1.2,
   envelope: 0,
   targetEnvelope: 0,
   claimed: false,
@@ -634,9 +631,9 @@ function createInitialDynamicState() {
     // Main breaker: placed at the Hokusai composition focus so it naturally
     // breaks within the frame. Higher amplitude and tighter width give a
     // plunging crest that the breaker sheets can ride.
-    { direction: normalize2([0.20, -0.98]), center: [-10.5, 14.0], amplitude: 2.10, modulation: 0.12, phase: 0.6 },
-    { direction: normalize2([-0.55, 0.83]), center: [7, 3], amplitude: 1.08, modulation: 0.15, phase: 2.0 },
-    { direction: normalize2([0.90, -0.44]), center: [-18, 27], amplitude: 0.72, modulation: 0.10, phase: -1.1 },
+    { direction: normalize2([0.20, -0.98]), center: [-10.5, 14.0], amplitude: 3.50, modulation: 0.12, phase: 0.6 },
+    { direction: normalize2([-0.55, 0.83]), center: [7, 3], amplitude: 1.50, modulation: 0.15, phase: 2.0 },
+    { direction: normalize2([0.90, -0.44]), center: [-18, 27], amplitude: 1.00, modulation: 0.10, phase: -1.1 },
   ];
 
   for (let y = 0; y < SIMULATION_SIZE; y += 1) {
@@ -1177,7 +1174,7 @@ function draw(now) {
   uniforms.set([camRight[0], camRight[1], camRight[2], tanHalfY * aspect], 36);
   uniforms.set([camUp[0], camUp[1], camUp[2], tanHalfY], 40);
   uniforms.set([forward[0], forward[1], forward[2], 0], 44);
-  uniforms.set([MOUNTAIN.centerX, MOUNTAIN.centerZ, MOUNTAIN.peakHeight, MOUNTAIN.baseRadius], 48);
+  // Mountain removed: background is only sky + clouds now.
   device.queue.writeBuffer(uniformBuffer, 0, uniforms);
   writeEvolveParams(elapsed * motionSpeed, deltaSeconds);
   writeDynamicParams(dynamicTime, dynamicDelta / DYNAMIC_SUBSTEPS, 0);

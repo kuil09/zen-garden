@@ -11,7 +11,6 @@ struct Uniforms {
   camRight: vec4f,
   camUp: vec4f,
   camForward: vec4f,
-  mountain: vec4f,
 }
 
 struct OceanPoint {
@@ -141,6 +140,7 @@ fn microNormal(worldPosition: vec3f, normal: vec3f, foam: f32) -> vec3f {
 const INK_PAPER: vec3f = vec3f(0.945, 0.918, 0.847);
 const INK_MIST: vec3f = vec3f(0.741, 0.792, 0.808);
 const INK_PALE: vec3f = vec3f(0.451, 0.596, 0.667);
+const INK_FOAM: vec3f = vec3f(0.98, 0.99, 1.0); // bright white foam
 const INK_MID: vec3f = vec3f(0.188, 0.376, 0.545);
 const INK_PRUSSIAN: vec3f = vec3f(0.063, 0.180, 0.341);
 const INK_SUMI: vec3f = vec3f(0.043, 0.075, 0.129);
@@ -238,14 +238,13 @@ fn surfaceFragment(input: SurfaceOutput) -> @location(0) vec4f {
     let tip = saturate(height / max(claw.x, 0.001));
     // A finger of foam against a paper sky is invisible unless it is drawn. Give
     // it the carved outline and the pale underside that the print uses.
-    // Filled with the pale plate, not with paper: a white finger on a cream sky
-    // would be nothing but its outline.
-    var clawColor = INK_MIST;
-    clawColor = mix(INK_PALE, clawColor, smoothstep(0.02, 0.40, tip));
-    clawColor = mix(clawColor, INK_PAPER, smoothstep(0.45, 0.92, tip) * 0.85);
-    clawColor = mix(clawColor, INK_PALE, smoothstep(0.68, 0.96, claw.y) * 0.85);
+    // Bright white foam claws for dramatic breaking waves.
+    var clawColor = INK_FOAM;
+    clawColor = mix(INK_FOAM, clawColor, smoothstep(0.02, 0.40, tip));
+    clawColor = mix(clawColor, INK_PAPER, smoothstep(0.35, 0.85, tip) * 0.9);
+    clawColor = mix(clawColor, INK_FOAM, smoothstep(0.60, 0.96, claw.y) * 0.9);
     let outline = max(smoothstep(0.945, 1.0, claw.y), smoothstep(0.965, 1.0, tip));
-    clawColor = mix(clawColor, INK_MID, outline * 0.70);
+    clawColor = mix(clawColor, INK_MID, outline * 0.50);
     return vec4f(clawColor, 1.0);
   }
 
@@ -285,20 +284,21 @@ fn surfaceFragment(input: SurfaceOutput) -> @location(0) vec4f {
   color = mix(color, vec3f(0.353, 0.612, 0.596), crest * 0.38);
 
   // Foam is unprinted paper: a hard edge, never a gradient.
+  // More aggressive foam for dramatic breaking waves.
   var foamMask = 0.0;
   var foamEdge = 0.0;
   if (onSheet) {
     let sheet = input.sheetCoordinates;
     // Inside the barrel the aerated water lies in bands that follow the crest,
     // so the boundary wanders along u rather than breaking into vertical spikes.
-    let reach = (0.02 + 0.11 * input.foam) * smoothstep(0.20, 0.72, input.foam);
+    let reach = (0.03 + 0.18 * input.foam) * smoothstep(0.15, 0.75, input.foam);
     let band = fbm(vec2f(sheet.x * 3.4, 1.7)) - 0.5;
-    let claws = clawField(sheet, reach * 0.65, 3.7, 3, 3.1).x;
-    let boundary = WAVE_LIP_V - reach - band * 0.20 - claws;
+    let claws = clawField(sheet, reach * 0.85, 4.5, 4, 3.5).x;
+    let boundary = WAVE_LIP_V - reach - band * 0.25 - claws;
     foamMask = step(boundary, sheet.y);
-    foamEdge = step(boundary - 0.055, sheet.y);
+    foamEdge = step(boundary - 0.07, sheet.y);
     // The tongue is solid white water once the wave is well into its break.
-    foamMask = max(foamMask, step(0.93, sheet.y));
+    foamMask = max(foamMask, step(0.90, sheet.y));
   } else {
     let breakup = fbm(input.fieldCoordinates * 1.35);
     let fine = fbm(input.fieldCoordinates * 5.8 + vec2f(11.3, -4.1));
@@ -306,8 +306,8 @@ fn surfaceFragment(input: SurfaceOutput) -> @location(0) vec4f {
     foamMask = step(0.5, input.foam * 1.9 - porosity * 0.70 + 0.10);
     foamEdge = step(0.5, input.foam * 1.9 - porosity * 0.70 - 0.02);
   }
-  color = mix(color, INK_PALE, foamEdge * 0.75);
-  color = mix(color, INK_PAPER, foamMask);
+  color = mix(color, INK_FOAM, foamEdge * 0.9);
+  color = mix(color, INK_PAPER, foamMask * 1.1);
 
   let distance = length(u.cameraTime.xyz - input.worldPosition);
   color = mix(color, INK_PALE, smoothstep(70.0, 220.0, distance) * 0.55);
@@ -338,78 +338,6 @@ fn backgroundRay(ndc: vec2f) -> vec3f {
     + u.camUp.xyz * (ndc.y * u.camUp.w));
 }
 
-// The mountain stands at a fixed world position, so the ray is intersected
-// with its radial profile instead of drawing it in screen space. Profile:
-// concave flanks rising to a flat, slightly dished summit. The base sits below
-// sea level, where the ocean mesh covers it.
-fn mountainHeight(radius: f32) -> f32 {
-  let flank = pow(saturate(1.0 - radius / u.mountain.w), 0.55);
-  let crater = 1.0 - 0.12 * smoothstep(u.mountain.w * 0.10, 0.0, radius);
-  return flank * u.mountain.z * crater;
-}
-
-// First intersection of the ray with the mountain profile, as a ray parameter
-// t (world point = origin + t·direction), or -1. Solved in the vertical plane
-// through the mountain centre: the chord the ray cuts across the base disc is
-// marched, then the crossing is bisected. Cheap, and only runs on background
-// pixels.
-fn mountainHit(origin: vec3f, direction: vec3f) -> f32 {
-  let toCentre = u.mountain.xz - origin.xz;
-  let dirLength = length(direction.xz);
-  if (dirLength < 1e-4) {
-    return -1.0;
-  }
-  let dirFlat = direction.xz / dirLength;
-  let along = dot(toCentre, dirFlat);
-  let perpendicular = length(toCentre - dirFlat * along);
-  if (perpendicular >= u.mountain.w) {
-    return -1.0;
-  }
-  let halfChord = sqrt(u.mountain.w * u.mountain.w - perpendicular * perpendicular);
-
-  var entry = -halfChord;
-  var exit = halfChord;
-  let behind = -along;
-  if (entry < behind) {
-    entry = behind;
-  }
-  if (exit <= entry) {
-    return -1.0;
-  }
-
-  let steps = 40i;
-  let stride = (exit - entry) / f32(steps);
-  var previous = entry;
-  var crossed = false;
-  for (var i = 1; i <= steps; i = i + 1) {
-    let s = entry + stride * f32(i);
-    let t = (along + s) / dirLength;
-    let rayHeight = origin.y + t * direction.y;
-    let ground = mountainHeight(sqrt(perpendicular * perpendicular + s * s));
-    if (rayHeight <= ground) {
-      exit = s;
-      crossed = true;
-      break;
-    }
-    previous = s;
-  }
-  if (!crossed) {
-    return -1.0;
-  }
-  for (var i = 0; i < 7; i = i + 1) {
-    let middle = (previous + exit) * 0.5;
-    let t = (along + middle) / dirLength;
-    let rayHeight = origin.y + t * direction.y;
-    let ground = mountainHeight(sqrt(perpendicular * perpendicular + middle * middle));
-    if (rayHeight <= ground) {
-      exit = middle;
-    } else {
-      previous = middle;
-    }
-  }
-  return (along + exit) / dirLength;
-}
-
 @fragment
 fn backgroundFragment(input: BackgroundOutput) -> @location(0) vec4f {
   let uv = input.position.xy / u.resolutionMotion.xy;
@@ -431,27 +359,6 @@ fn backgroundFragment(input: BackgroundOutput) -> @location(0) vec4f {
   let cloudShape = fbm(cloudCoordinates + vec2f(fbm(cloudCoordinates * 0.5) * 1.4, 0.0));
   let cloudMask = step(0.62, cloudShape) * smoothstep(0.005, 0.10, direction.y);
   color = mix(color, INK_PAPER, cloudMask * 0.72);
-
-  let chord = mountainHit(u.cameraTime.xyz, direction);
-  if (chord >= 0.0) {
-    let hit = u.cameraTime.xyz + direction * chord;
-    let radius = length(hit.xz - u.mountain.xz);
-    let heightFraction = saturate(hit.y / max(u.mountain.z, 0.001));
-
-    var mountainColor = INK_MIST;
-    mountainColor = mix(mountainColor, INK_PALE, smoothstep(0.30, 0.0, heightFraction) * 0.35);
-    // Snow sits on the upper flank with a wind-scuffed boundary.
-    let bearingHit = atan2(hit.x - u.mountain.x, hit.z - u.mountain.z);
-    let snowLine = 0.50
-      + 0.05 * sin(bearingHit * 7.0 + 1.3)
-      + (fbm(hit.xz * 0.45) - 0.5) * 0.14;
-    let snow = step(snowLine, heightFraction);
-    color = mix(color, mountainColor, 1.0);
-    color = mix(color, INK_PAPER, snow * 0.90);
-    // The dished summit reads as one carved line under the rim.
-    let crater = smoothstep(u.mountain.w * 0.09, 0.0, radius) * step(0.86, heightFraction);
-    color = mix(color, INK_PALE, crater * 0.30);
-  }
 
   return vec4f(max(color, vec3f(0.0)), 1.0);
 }
