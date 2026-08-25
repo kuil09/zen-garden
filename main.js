@@ -380,7 +380,7 @@ function updateBreakerAnchors(summary) {
   breakerSummary = summary;
   const components = extractBreakerComponents(summary);
   // Filter out breakers too close to the camera
-  const MIN_BREAKER_DIST_FROM_CAMERA = 18.0; // world units
+  const MIN_BREAKER_DIST_FROM_CAMERA = 30.0; // world units - increased from 18
   const cameraX = cameraWorldPos[0];
   const cameraZ = cameraWorldPos[2];
   const filteredComponents = components.filter((c) => {
@@ -1202,8 +1202,8 @@ function draw(now) {
   // print wants its breaker mid-frame, left of the mountain, and the prior is
   // where that preference lives — explicit, not disguised as physics.
   const breakerConfig = new Float32Array([
-    -6.0, 14.0, // focus (world XZ)
-    30.0, 22.0, // ellipse radii
+    -3.0, 14.0, // focus (world XZ) - moved right from -6 to -3
+    22.0, 18.0, // ellipse radii - shrunk from 30,22 to cut left side
     camera[0], camera[2],
     6.0,        // minimum distance from camera
     0.02,       // score floor
