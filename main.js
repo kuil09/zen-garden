@@ -428,16 +428,21 @@ function updateBreakerAnchors(summary) {
     // Model parameters derived from how dominant this breaker is: the great
     // wave rears over a short crest stretch with a deep spiral, lesser waves
     // break faster and shallower.
-    anchor.targetRadius = Math.min(7.6, 1.6 + 6.0 * relative);
-    anchor.targetHeightGain = Math.min(1.0, 0.42 + 0.58 * relative);
-    anchor.curlRate = 0.61 - 0.19 * relative;
-    anchor.curlWaves = Math.min(8, Math.max(2.5, anchor.extent / 9));
-    anchor.targetCrestPeak = 0.55 - 0.25 * relative;
-    anchor.targetCrestWidth = 0.58 - 0.06 * relative;
-    anchor.targetThetaSpan = 3.0 + 1.9 * relative;
-    anchor.taper = 0.4;
-    anchor.targetThrowGain = 0.55 + 0.45 * relative;
-    anchor.targetDetailGain = Math.min(1.25, 0.7 + 0.6 * relative);
+    // Add seeded variation per component for less homogeneity.
+    const seed = component.centerX * 12.9898 + component.centerZ * 78.233 + component.extent * 45.164;
+    const rand = mulberry32(Math.abs(seed >>> 0));
+    const varScale = 0.15 + 0.1 * relative; // more variation for dominant breakers
+    
+    anchor.targetRadius = Math.min(8.5, (1.6 + 6.0 * relative) * (1.0 + (rand() - 0.5) * varScale));
+    anchor.targetHeightGain = Math.min(1.2, (0.42 + 0.58 * relative) * (1.0 + (rand() - 0.5) * varScale));
+    anchor.curlRate = (0.61 - 0.19 * relative) * (1.0 + (rand() - 0.5) * 0.1);
+    anchor.curlWaves = Math.min(8, Math.max(2.5, anchor.extent / 9)) * (1.0 + (rand() - 0.5) * 0.08);
+    anchor.targetCrestPeak = (0.55 - 0.25 * relative) * (1.0 + (rand() - 0.5) * 0.12);
+    anchor.targetCrestWidth = (0.58 - 0.06 * relative) * (1.0 + (rand() - 0.5) * 0.15);
+    anchor.targetThetaSpan = (3.0 + 2.2 * relative) * (1.0 + (rand() - 0.5) * 0.1);
+    anchor.taper = 0.4 * (1.0 + (rand() - 0.5) * 0.2);
+    anchor.targetThrowGain = (0.55 + 0.55 * relative) * (1.0 + (rand() - 0.5) * varScale);
+    anchor.targetDetailGain = Math.min(1.5, (0.7 + 0.6 * relative) * (1.0 + (rand() - 0.5) * 0.12));
   }
 }
 

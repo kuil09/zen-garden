@@ -73,40 +73,51 @@ fn waveParams(instance: u32) -> WaveParams {
 }
 
 // Cross-section of the breaker in (forward, up), in units of the curl radius.
-// Three segments: a submerged skirt, the steep concave face rising out of the
-// trough, and a shrinking spiral that carries the lip past vertical and throws
-// the tongue forward and down. The spiral is what makes the surface multi-valued
-// in (x, z) — the thing a height field cannot do.
+// Three segments: submerged skirt, near-vertical concave face, tight spiral lip.
+// The spiral goes PAST vertical and curls BACK inward — deep barrel.
 fn waveProfile(v: f32, curl: f32, params: WaveParams) -> vec2f {
   let trough = vec2f(WAVE_TROUGH_X, WAVE_TROUGH_Y);
   if (v < WAVE_SKIRT_END) {
     let k = smoothstep(0.0, 1.0, v / WAVE_SKIRT_END);
-    return mix(vec2f(2.40, -0.70), trough, k);
+    return mix(vec2f(2.20, -0.80), trough, k);
   }
   if (v < WAVE_CREST_V) {
     let a = (v - WAVE_SKIRT_END) / (WAVE_CREST_V - WAVE_SKIRT_END);
+    // Near-vertical face: x barely moves while y shoots up
     let crestY = WAVE_BARREL_Y + WAVE_CREST_RADIUS;
-    let rise = pow(a, 0.86);
+    let rise = pow(a, 0.70); // faster rise = steeper face
     return vec2f(
-      WAVE_TROUGH_X * pow(1.0 - a, 1.55),
+      WAVE_TROUGH_X * pow(1.0 - a, 2.2), // much tighter x convergence
       mix(WAVE_TROUGH_Y, crestY, rise),
     );
   }
   let t = (v - WAVE_CREST_V) / (1.0 - WAVE_CREST_V);
-  let theta = params.thetaSpan * mix(0.42, 1.0, curl) * t;
-  let radius = WAVE_CREST_RADIUS * (1.0 - params.taper * pow(t, 1.10));
-  let throwOut = vec2f(5.50, -5.50) * params.throwGain * curl
-    * smoothstep(0.25, 1.0, t);
-  return vec2f(0.0, WAVE_BARREL_Y) + radius * vec2f(sin(theta), cos(theta)) + throwOut;
+  // Tighter, faster spiral: more theta in less v = tighter curl inward
+  let theta = params.thetaSpan * mix(0.35, 1.0, curl) * t;
+  // Radius shrinks faster = tighter tube
+  let radius = WAVE_CREST_RADIUS * (1.0 - params.taper * pow(t, 1.4));
+  // Throw: more horizontal initially, then sharp downward flick
+  let throwOut = vec2f(6.0, -4.0) * params.throwGain * curl
+    * smoothstep(0.15, 1.0, t);
+  // Additional inward curl at the very tip (t > 0.7)
+  let tipCurl = smoothstep(0.7, 0.95, t);
+  let inwardFlick = vec2f(-1.8, -1.2) * params.throwGain * curl * tipCurl;
+  return vec2f(0.0, WAVE_BARREL_Y) + radius * vec2f(sin(theta), cos(theta)) + throwOut + inwardFlick;
 }
 
 // How far through the break each slice of the crest is. Travelling this phase
 // along u staggers the claws the way Hokusai stacks them, and it loops cleanly.
+// Added: per-instance variation via seed, secondary harmonics for less homogeneity.
 fn waveCurl(u: f32, params: WaveParams, time: f32) -> f32 {
   let phase = u * params.curlWaves - time * params.curlRate + params.phaseOffset;
   let staggered = 0.5 + 0.5 * sin(phase);
   let secondary = 0.5 + 0.5 * sin(phase * 0.41 + 1.7);
-  return clamp(0.34 + 0.52 * staggered + 0.20 * secondary, 0.0, 1.0);
+  let tertiary = 0.5 + 0.5 * sin(phase * 0.19 + 3.1); // extra variation
+  let base = 0.30 + 0.55 * staggered + 0.18 * secondary + 0.10 * tertiary;
+  // Subtle per-instance variation using phaseOffset as seed proxy
+  let varSeed = fract(params.phaseOffset * 12.9898);
+  let variation = (hash11(varSeed + u * 7.3) - 0.5) * 0.12;
+  return clamp(base + variation, 0.0, 1.0);
 }
 
 // Deliberately asymmetric: the wave rears up over a short stretch of crest and
@@ -117,7 +128,11 @@ fn waveCrestScale(u: f32, params: WaveParams) -> f32 {
   let decay = exp(-max(0.0, u - hold) / params.crestWidth);
   let shoulder = 0.10 + 0.90 * decay;
   let ends = smoothstep(0.0, 0.08, 1.0 - u);
-  return params.heightGain * rise * shoulder * ends;
+  let baseScale = params.heightGain * rise * shoulder * ends;
+  // Subtle variation along crest using phaseOffset as seed
+  let varSeed = fract(params.phaseOffset * 45.6789);
+  let variation = 1.0 + (hash11(varSeed + u * 11.3) - 0.5) * 0.18;
+  return baseScale * variation;
 }
 
 struct WaveSample {
@@ -227,15 +242,23 @@ fn clawVertex(@location(0) uv: vec2f, @builtin(instance_index) instance: u32) ->
 
   let reach = WAVE_CLAW_REACH * mix(0.5, 1.0, curl);
   let extent = uv.y * reach;
-  // Fingers fan apart slightly as they rise, the way thrown water separates.
-  let fan = (hash11(floor(uv.x * 5.2) + 3.7) - 0.5) * 0.75 * uv.y;
+  // Fingers fan apart as they rise — more variation per finger.
+  let fingerIndex = floor(uv.x * 8.0);
+  let fan = (hash11(fingerIndex * 7.3 + 3.7 + params.phaseOffset * 13.0) - 0.5) * 1.1 * uv.y;
+  // Variable reach per finger
+  let reachVar = 0.7 + hash11(fingerIndex * 11.7 + params.phaseOffset * 17.0) * 0.6;
+  let thisReach = reach * reachVar;
+  let thisExtent = uv.y * thisReach;
 
   var position = params.originA
     + along * (uv.x * span + fan * scale)
-    + axis * (root.x * scale + outward.x * extent * clawScale)
-    + vec3f(0.0, root.y * scale + outward.y * extent * clawScale, 0.0);
-  // Gravity bends the tips back over.
-  position.y -= uv.y * uv.y * 0.20 * clawScale;
+    + axis * (root.x * scale + outward.x * thisExtent * clawScale)
+    + vec3f(0.0, root.y * scale + outward.y * thisExtent * clawScale, 0.0);
+  // Gravity bends tips back — variable per finger
+  let gravityVar = 0.8 + hash11(fingerIndex * 19.3 + params.phaseOffset * 23.0) * 0.4;
+  position.y -= uv.y * uv.y * 0.22 * clawScale * gravityVar;
+  // Slight vertical jitter for organic feel
+  position.y += (hash11(fingerIndex * 31.0 + uv.y * 17.0) - 0.5) * 0.08 * clawScale;
 
   var output: SurfaceOutput;
   output.position = u.viewProjection * vec4f(position, 1.0);
