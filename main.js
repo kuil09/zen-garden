@@ -5,10 +5,12 @@ import breakersShader from './shaders/breakers.wgsl?raw';
 import sceneShader from './shaders/scene.wgsl?raw';
 import waveGeometryShader from './shaders/wave-geometry.wgsl?raw';
 import postShader from './shaders/post.wgsl?raw';
+import { toggleOceanSound } from './ocean-sound.js';
 
 const canvas = document.querySelector('#ocean');
 const experience = document.querySelector('#experience');
 const motionToggle = document.querySelector('#motionToggle');
+const soundToggle = document.querySelector('#soundToggle');
 const status = document.querySelector('#status');
 const notice = document.querySelector('#notice');
 
@@ -1301,6 +1303,7 @@ canvas.addEventListener('pointerleave', () => {
   pointer = [0.5, 0.5];
 });
 motionToggle.addEventListener('click', () => setMoving(!moving));
+soundToggle.addEventListener('click', toggleOceanSound);
 window.addEventListener('keydown', (event) => {
   if (event.code !== 'Space' || event.repeat) return;
   event.preventDefault();
