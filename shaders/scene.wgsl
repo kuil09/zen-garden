@@ -308,15 +308,16 @@ fn surfaceFragment(input: SurfaceOutput) -> @location(0) vec4f {
     foamMask = step(0.4, input.foam * 2.3 - porosity * 0.75 + 0.12);
     foamEdge = step(0.4, input.foam * 2.3 - porosity * 0.75 - 0.01);
     // Suppress foam too close to camera (boundary waves entering view edge)
+    // Extended: start fading at 15, fully faded by 35 (was 8-22)
     let distToCam = length(u.cameraTime.xyz - input.worldPosition);
-    let nearFade = smoothstep(8.0, 22.0, distToCam);
+    let nearFade = smoothstep(15.0, 35.0, distToCam);
     foamMask *= nearFade;
     foamEdge *= nearFade;
     // Suppress foam on far left of view (camera-relative X)
-    // Project world pos onto camera right axis to get horizontal view offset
+    // Extended: start fading at -35, fully faded by -25 (was -28 to -18)
     let toWorld = input.worldPosition - u.cameraTime.xyz;
     let viewX = dot(toWorld, u.camRight.xyz);
-    let leftFade = smoothstep(-28.0, -18.0, viewX); // fade out left of view center
+    let leftFade = smoothstep(-35.0, -25.0, viewX); // fade out left of view center
     foamMask *= leftFade;
     foamEdge *= leftFade;
   }

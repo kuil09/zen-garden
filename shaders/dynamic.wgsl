@@ -185,12 +185,12 @@ fn evolveDynamicWater(@builtin(global_invocation_id) id: vec3u) {
   elevation = mix(elevation, farElevation, farBlend);
   momentum = mix(momentum, farFlow, farBlend);
 
-  // Side boundary waves — reduced amplitude & moved further from camera view
-  // Original uv.y 0.14-0.34 was ~12-29 units in front of camera (Z=-32), causing foam on left view edge
-  let sideBand = (1.0 - smoothstep(0.015, 0.075, uv.x))  // tighter X range
-    * smoothstep(0.22, 0.42, uv.y) * (1.0 - smoothstep(0.82, 0.96, uv.y));  // moved further in Z
+  // Side boundary waves — pushed far back from camera view
+  // Camera at Z=-32, target at Z=12. uv.y=0.45→Z=-3.5, uv.y=0.65→Z=12.6 (beyond target)
+  let sideBand = (1.0 - smoothstep(0.015, 0.075, uv.x))  // tight X range
+    * smoothstep(0.45, 0.65, uv.y) * (1.0 - smoothstep(0.85, 0.98, uv.y));  // pushed far in Z
   let sidePhase = params.time * 2.48 + world.y * 0.23 + sin(world.y * 0.08 - params.time * 0.13) * 0.42;
-  let sideElevation = (sin(sidePhase) + 0.18 * sin(sidePhase * 2.0 + 0.9)) * 0.18;  // 0.42 → 0.18 (57% reduction)
+  let sideElevation = (sin(sidePhase) + 0.18 * sin(sidePhase * 2.0 + 0.9)) * 0.12;  // further reduced: 0.18 → 0.12
   let sideFlow = vec2f(1.0, 0.12) * sideElevation * sqrt(GRAVITY * REST_DEPTH);
   let sideBlend = sideBand * min(1.0, dt * 6.2);
   elevation = mix(elevation, sideElevation, sideBlend);

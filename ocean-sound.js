@@ -1,8 +1,10 @@
 // Procedural Ocean Sound (Web Audio API, royalty-free, no external files)
 // Generates pink-ish noise with slow amplitude modulation for wave-like rhythm
+// Includes spatial audio via PannerNode that follows the main breaker position
 
 let audioContext = null;
 let soundGain = null;
+let soundPanner = null;  // PannerNode for spatial audio
 let soundEnabled = false;
 let soundSource = null;
 let soundInterval = null;
@@ -11,9 +13,28 @@ let soundNoiseBuffer = null;
 export async function initOceanSound() {
   if (audioContext) return;
   audioContext = new (window.AudioContext || window.webkitAudioContext)();
+  
+  // Master gain
   soundGain = audioContext.createGain();
   soundGain.gain.value = 0;
-  soundGain.connect(audioContext.destination);
+  
+  // Spatial panner - follows main breaker position
+  soundPanner = audioContext.createPanner();
+  soundPanner.panningModel = 'HRTF';  // High-quality spatialization
+  soundPanner.distanceModel = 'inverse';
+  soundPanner.refDistance = 8.0;      // Reference distance (world units)
+  soundPanner.maxDistance = 120.0;    // Max distance for attenuation
+  soundPanner.rolloffFactor = 1.2;    // Roll-off rate
+  soundPanner.coneInnerAngle = 120;   // Inner cone (full volume)
+  soundPanner.coneOuterAngle = 180;   // Outer cone
+  soundPanner.coneOuterGain = 0.3;    // Gain outside cone
+  soundPanner.orientationX = 0;
+  soundPanner.orientationY = 0;
+  soundPanner.orientationZ = -1;      // Facing camera (negative Z)
+  
+  // Chain: source -> gain -> panner -> destination
+  soundGain.connect(soundPanner);
+  soundPanner.connect(audioContext.destination);
 
   // Generate band-limited noise buffer (10 seconds, loopable)
   const sampleRate = audioContext.sampleRate;
@@ -101,4 +122,44 @@ export function toggleOceanSound() {
 
 export function isSoundEnabled() {
   return soundEnabled;
+}
+
+/**
+ * Update spatial panner position to follow the main breaker
+ * @param {number} x - World X position
+ * @param {number} y - World Y position (height)
+ * @param {number} z - World Z position
+ * @param {number} dirX - Breaker direction X (optional, for orientation)
+ * @param {number} dirZ - Breaker direction Z (optional, for orientation)
+ */
+export function updateBreakerPosition(x, y, z, dirX = 0, dirZ = -1) {
+  if (!soundPanner) return;
+  
+  // Position the panner at the breaker location
+  soundPanner.positionX.setValueAtTime(x, audioContext.currentTime);
+  soundPanner.positionY.setValueAtTime(y, audioContext.currentTime);
+  soundPanner.positionZ.setValueAtTime(z, audioContext.currentTime);
+  
+  // Orient panner to face the breaker's direction
+  // This makes the sound directional along the wave crest
+  soundPanner.orientationX.setValueAtTime(dirX, audioContext.currentTime);
+  soundPanner.orientationY.setValueAtTime(0, audioContext.currentTime);
+  soundPanner.orientationZ.setValueAtTime(dirZ, audioContext.currentTime);
+}
+
+export function setListenerPosition(x, y, z, forwardX, forwardY, forwardZ, upX, upY, upZ) {
+  if (!audioContext || !audioContext.listener) return;
+  
+  // Update listener position (camera)
+  audioContext.listener.positionX.setValueAtTime(x, audioContext.currentTime);
+  audioContext.listener.positionY.setValueAtTime(y, audioContext.currentTime);
+  audioContext.listener.positionZ.setValueAtTime(z, audioContext.currentTime);
+  
+  // Update listener orientation
+  audioContext.listener.forwardX.setValueAtTime(forwardX, audioContext.currentTime);
+  audioContext.listener.forwardY.setValueAtTime(forwardY, audioContext.currentTime);
+  audioContext.listener.forwardZ.setValueAtTime(forwardZ, audioContext.currentTime);
+  audioContext.listener.upX.setValueAtTime(upX, audioContext.currentTime);
+  audioContext.listener.upY.setValueAtTime(upY, audioContext.currentTime);
+  audioContext.listener.upZ.setValueAtTime(upZ, audioContext.currentTime);
 }
