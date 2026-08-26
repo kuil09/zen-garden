@@ -1123,6 +1123,9 @@ async function initialize() {
 
   resize();
   experience.classList.add('is-ready');
+  // Reset timers right before starting render loop so first frame has elapsed ≈ 0
+  startTime = performance.now();
+  previousFrame = performance.now();
   frameRequest = requestAnimationFrame(draw);
 }
 
