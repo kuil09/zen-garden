@@ -40,7 +40,13 @@ export async function initOceanSound() {
 
 export async function startOceanSound() {
   if (!audioContext) await initOceanSound();
-  if (audioContext.state === 'suspended') await audioContext.resume();
+  
+  // CRITICAL: resume must happen in user gesture context
+  if (audioContext.state === 'suspended') {
+    console.log('[OceanSound] Resuming AudioContext...');
+    await audioContext.resume();
+    console.log('[OceanSound] AudioContext state:', audioContext.state);
+  }
 
   stopOceanSound(); // clean up any existing
 
@@ -50,6 +56,7 @@ export async function startOceanSound() {
   soundSource.loop = true;
   soundSource.connect(soundGain);
   soundSource.start(0);
+  console.log('[OceanSound] Source started, gain:', soundGain.gain.value);
 
   // Slow amplitude modulation (wave rhythm ~8-12 second periods)
   let phase = 0;
@@ -84,8 +91,9 @@ export function toggleOceanSound() {
   soundEnabled = !soundEnabled;
   const btn = document.getElementById('soundToggle');
   if (btn) btn.setAttribute('aria-pressed', soundEnabled);
+  console.log('[OceanSound] Toggle:', soundEnabled ? 'ON' : 'OFF');
   if (soundEnabled) {
-    startOceanSound().catch(console.error);
+    startOceanSound().catch(err => console.error('[OceanSound] Start failed:', err));
   } else {
     stopOceanSound();
   }

@@ -1293,7 +1293,7 @@ function draw(now) {
   frameRequest = requestAnimationFrame(draw);
 }
 
-canvas.addEventListener('pointermove', trackPointer, { passive: true });
+// pointermove removed: no passive following
 canvas.addEventListener('pointerdown', (event) => {
   trackPointer(event);
   interactionEnergy = 1;

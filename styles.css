@@ -44,7 +44,7 @@ button {
 }
 
 #ocean {
-  cursor: none;
+  cursor: default;
   display: block;
   opacity: 0;
   outline: none;
