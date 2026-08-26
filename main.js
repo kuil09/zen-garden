@@ -1140,7 +1140,6 @@ function setGrid(pass, grid) {
 }
 
 function draw(now) {
-  resize();
   const deltaMilliseconds = Math.min(50, now - previousFrame);
   previousFrame = now;
   adaptQuality(deltaMilliseconds);
