@@ -28,9 +28,8 @@ export async function initOceanSound() {
   soundPanner.coneInnerAngle = 120;   // Inner cone (full volume)
   soundPanner.coneOuterAngle = 180;   // Outer cone
   soundPanner.coneOuterGain = 0.3;    // Gain outside cone
-  soundPanner.orientationX = 0;
-  soundPanner.orientationY = 0;
-  soundPanner.orientationZ = -1;      // Facing camera (negative Z)
+  // Orientation: facing negative Z (toward camera). Use setOrientation for initial setup.
+  soundPanner.setOrientation(0, 0, -1);
   
   // Chain: source -> gain -> panner -> destination
   soundGain.connect(soundPanner);
