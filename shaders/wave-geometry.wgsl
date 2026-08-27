@@ -440,3 +440,52 @@ fn fractureDepth(sampleU: f32, sampleV: f32, feature: FractureFeature, gate: f32
   let footprint = (1.0 - r2) * (1.0 + feature.shape.y * du);
   return feature.region.w * clamp(footprint, 0.0, 1.0) * gate;
 }
+
+// #8 — Hierarchical foam-claw ribbon graph (additive foundation).
+//
+// Replaces the single flat claw strip (fragment discard) with an instanced
+// cubic Bézier ribbon graph: primary fingers define the silhouette rhythm,
+// secondary branches hang off a parent's t, and droplets emit from tips.
+// The live clawVertex() above is unchanged; foamFingerPoint() is the geometry
+// the foam vertex stage will switch to once a deterministic finger graph is
+// generated on the CPU (see spray.wgsl FoamFinger + #10 deterministic seed).
+// ============================================================================
+struct FoamFinger {
+  // rootU, rootV, parentIndex, generation
+  root: vec4f,
+  // tangent angle, normal lift, length, base width
+  shapeA: vec4f,
+  // hook, taper, twist, phase
+  shapeB: vec4f,
+  // deterministic seed and visibility envelope
+  life: vec4f,
+}
+
+// Cubic Bézier ribbon centreline for one finger, evaluated at parameter t.
+// root tangent comes from the #6 crest/hook tangent; primary fingers lift up
+// and forward then curl back toward the barrel in the second half.
+fn foamFingerPoint(finger: FoamFinger, profilePos: vec3f, crestTangent: vec3f, t: f32) -> vec3f {
+  let up = vec3f(0.0, 1.0, 0.0);
+  let side = normalize(cross(crestTangent, up) + vec3f(0.0001, 0.0, 0.0));
+  let dir = normalize(crestTangent * cos(finger.shapeA.x) + up * sin(finger.shapeA.x));
+  let root = profilePos;
+  let shoulder = root + dir * (finger.shapeA.z * 0.35) + up * finger.shapeA.y;
+  // hook: bend back toward the barrel in the latter half
+  let hook = shoulder + dir * (finger.shapeA.z * 0.45)
+              - side * (finger.shapeB.x * finger.shapeA.z);
+  let tip = hook + dir * (finger.shapeA.z * 0.20)
+            - side * (finger.shapeB.x * finger.shapeA.z * 1.4);
+  let u = clamp(t, 0.0, 1.0);
+  let w0 = (1.0 - u) * (1.0 - u) * (1.0 - u);
+  let w1 = 3.0 * (1.0 - u) * (1.0 - u) * u;
+  let w2 = 3.0 * (1.0 - u) * u * u;
+  let w3 = u * u * u;
+  return root * w0 + shoulder * w1 + hook * w2 + tip * w3;
+}
+
+// Ribbon half-width at parameter t (tapered, with a hard screen-space minimum
+// applied later in the vertex stage so tips never collapse to a 1px line).
+fn foamFingerWidth(finger: FoamFinger, t: f32) -> f32 {
+  let taper = mix(1.0, finger.shapeB.y, clamp(t, 0.0, 1.0));
+  return max(finger.shapeA.w * taper, 0.0015);
+}
