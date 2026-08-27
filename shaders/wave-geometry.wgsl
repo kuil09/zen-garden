@@ -284,3 +284,51 @@ fn clawVertex(@location(0) uv: vec2f, @builtin(instance_index) instance: u32) ->
   output.sheetWeight = 2.0;
   return output;
 }
+
+// ============================================================================
+// #12 — Curvature-gated meso fracture (additive foundation).
+//
+// Replaces uniform global noise with 5–12 sparse fracture features (scallop /
+// wedge notch / split tongue / broken island) placed in crest-local coordinates
+// and activated only where curvature, region, break phase and the crest envelope
+// all agree. Positions are fixed in object space (hero seed) so they never
+// slide with the camera; phase only changes their depth/severity.
+// The live sheet stays unchanged; fractureGate()/FractureFeature feed the meso
+// displacement pass that #6/#7 will expose once the macro geometry lands.
+// ============================================================================
+struct FractureFeature {
+  // centreU, centreV, width, depth
+  region: vec4f,
+  // direction, skew, kind, seed
+  shape: vec4f,
+  // birthPhase, peakPhase, deathPhase, lodClass
+  life: vec4f,
+}
+
+// Gate: 1.0 only where the fracture is allowed to bite. Keeps meso roughness on
+// the crest/hook/tongue boundaries and off the flat face and submerged skirt.
+fn fractureGate(
+  profileCurvature: f32,
+  regionMask: f32,
+  breakPhase: f32,
+  crestEnvelope: f32,
+  feature: FractureFeature
+) -> f32 {
+  let curvatureGate = smoothstep(0.15, 0.55, profileCurvature);
+  let phaseGate = smoothstep(feature.life.x, feature.life.y, breakPhase)
+               * (1.0 - smoothstep(feature.life.z * 0.85, feature.life.z, breakPhase));
+  return clamp(curvatureGate * regionMask * phaseGate * crestEnvelope, 0.0, 1.0);
+}
+
+// Depth contribution of a feature at a sample point, in profile (u, v) space.
+// Returns 0 outside the feature footprint; the meso pass turns this into a real
+// notch/tongue split on the actual geometry.
+fn fractureDepth(sampleU: f32, sampleV: f32, feature: FractureFeature, gate: f32) -> f32 {
+  let du = (sampleU - feature.region.x) / max(feature.region.z, 1e-3);
+  let dv = (sampleV - feature.region.y) / max(feature.region.z, 1e-3);
+  let r2 = du * du + dv * dv;
+  if (r2 > 1.0) { return 0.0; }
+  // soft circular footprint, deepest at centre, with a directional skew
+  let footprint = (1.0 - r2) * (1.0 + feature.shape.y * du);
+  return feature.region.w * clamp(footprint, 0.0, 1.0) * gate;
+}
