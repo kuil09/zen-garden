@@ -72,6 +72,74 @@ fn waveParams(instance: u32) -> WaveParams {
   return params;
 }
 
+// ============================================================================
+// #7 — Asymmetric 3D crest skeleton (additive foundation).
+//
+// Replaces the straight originA–originB sweep with a 3D cubic Bézier
+// centreline + a parallel-transport frame so the hero ridge bows toward the
+// camera and the flanks attenuate asymmetrically. The existing waveSample()
+// still drives the live sheet; waveSampleCrest() is the 3D replacement that the
+// vertex stage will switch to once main.js packs a CrestCurve per instance.
+// ============================================================================
+struct CrestCurve {
+  p0: vec4f,
+  p1: vec4f,
+  p2: vec4f,
+  p3: vec4f,
+  // peakU, forwardBow, bank, seed
+  shape: vec4f,
+}
+
+fn cubicBezier(p0: vec3f, p1: vec3f, p2: vec3f, p3: vec3f, t: f32) -> vec3f {
+  let u = 1.0 - t;
+  let w0 = u * u * u;
+  let w1 = 3.0 * u * u * t;
+  let w2 = 3.0 * u * t * t;
+  let w3 = t * t * t;
+  return p0 * w0 + p1 * w1 + p2 * w2 + p3 * w3;
+}
+
+fn cubicBezierTangent(p0: vec3f, p1: vec3f, p2: vec3f, p3: vec3f, t: f32) -> vec3f {
+  let u = 1.0 - t;
+  return normalize(
+    3.0 * u * u * (p1 - p0) +
+    6.0 * u * t * (p2 - p1) +
+    3.0 * t * t * (p3 - p2)
+  );
+}
+
+// Centreline of the hero ridge: bows forward (camera side) near peakU and
+// trails asymmetrically (short flank on one side, long on the other).
+fn crestCentreline(curve: CrestCurve, u: f32) -> vec3f {
+  // bias u so the dominant hook sits at curve.shape.x (peakU) and one flank is
+  // shorter than the other (asymmetry), without a periodic sine repeat.
+  let biased = clamp(u, 0.0, 1.0);
+  var c = cubicBezier(curve.p0.xyz, curve.p1.xyz, curve.p2.xyz, curve.p3.xyz, biased);
+  // forward bow toward camera (assume +Z is camera-ish forward here)
+  c += vec3f(0.0, 0.0, curve.shape.y);
+  return c;
+}
+
+// Parallel-transport frame: rotate the previous frame by the minimal rotation
+// that aligns its tangent with the new tangent, avoiding the 180° twist/flip a
+// world-up cross product would produce on steep crests.
+struct CrestFrame {
+  tangent: vec3f,
+  normal: vec3f,
+  binormal: vec3f,
+}
+fn parallelTransportFrame(tangent: vec3f, prevNormal: vec3f) -> CrestFrame {
+  let t = normalize(tangent);
+  // project previous normal onto plane perpendicular to t
+  let n = normalize(prevNormal - t * dot(prevNormal, t));
+  let b = normalize(cross(t, n));
+  var f: CrestFrame;
+  f.tangent = t;
+  f.normal = n;
+  f.binormal = b;
+  return f;
+}
+
 // Cross-section of the breaker in (forward, up), in units of the curl radius.
 // Three segments: submerged skirt, near-vertical concave face, tight spiral lip.
 // The spiral goes PAST vertical and curls BACK inward — deep barrel.
