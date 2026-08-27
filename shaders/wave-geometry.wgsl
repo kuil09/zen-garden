@@ -72,37 +72,73 @@ fn waveParams(instance: u32) -> WaveParams {
   return params;
 }
 
-// Cross-section of the breaker in (forward, up), in units of the curl radius.
-// Three segments: submerged skirt, near-vertical concave face, tight spiral lip.
-// The spiral goes PAST vertical and curls BACK inward — deep barrel.
+// #6 — Cross-section of the breaker in (forward, up), in units of the curl
+// radius. Rebuilt as FIVE explicit segments so the silhouette has intentional
+// sharpness instead of one smooth vertical cap:
+//   1. submerged skirt        (v: 0      .. SKIRT_END)
+//   2. concave face           (v: SKIRT_END .. FACE_END)
+//   3. crest bulb (thick)     (v: FACE_END   .. CREST_END)
+//   4. forward hook           (v: CREST_END  .. HOOK_END)
+//   5. returning tongue       (v: HOOK_END    .. 1.0)
+// The hook juts forward (~20-35% of height) and the tongue drops back BELOW the
+// crest maximum, opening the barrel / negative-space the original cap lacked.
+// NOTE: param renaming (faceConcavity/crestMass/hookReach/...) is deferred until
+// the CPU Breaker packing in main.js is updated; the shape still reads the
+// existing fields.
+const WAVE_FACE_END: f32 = 0.40;
+const WAVE_CREST_END: f32 = 0.52;
+const WAVE_HOOK_END: f32 = 0.74;
+
 fn waveProfile(v: f32, curl: f32, params: WaveParams) -> vec2f {
   let trough = vec2f(WAVE_TROUGH_X, WAVE_TROUGH_Y);
+  // curl (0..1) drives how aggressive the hook/tongue are.
+  let curlAmt = 0.45 + 0.55 * curl;
+
+  // --- Segment 1: submerged skirt -----------------------------------------
   if (v < WAVE_SKIRT_END) {
     let k = smoothstep(0.0, 1.0, v / WAVE_SKIRT_END);
     return mix(vec2f(2.20, -0.80), trough, k);
   }
-  if (v < WAVE_CREST_V) {
-    let a = (v - WAVE_SKIRT_END) / (WAVE_CREST_V - WAVE_SKIRT_END);
-    // Steep cliff face leaning slightly forward (~72° from horizontal, Hokusai).
+
+  // --- Segment 2: concave (near-vertical, slightly hollow) face -----------
+  if (v < WAVE_FACE_END) {
+    let a = (v - WAVE_SKIRT_END) / (WAVE_FACE_END - WAVE_SKIRT_END);
     let crestY = WAVE_BARREL_Y + WAVE_CREST_RADIUS;
-    let rise = pow(a, 0.62);
-    // Forward lean: face pushes forward as it rises (not perfectly vertical).
-    let lean = 0.55 * (a * a);
-    return vec2f(
-      WAVE_TROUGH_X * pow(1.0 - a, 2.4) + lean, // tighter x convergence + forward lean
-      mix(WAVE_TROUGH_Y, crestY, rise),
-    );
+    let rise = pow(a, 0.70);
+    // Concave: x stays near the trough then eases forward as it climbs, leaning
+    // forward (negative relative to pure vertical) — a hollow face, not a wall.
+    let lean = 0.35 * (a * a) - 0.10 * a;
+    return vec2f(WAVE_TROUGH_X * pow(1.0 - a, 2.2) + lean, mix(WAVE_TROUGH_Y, crestY, rise));
   }
-  // Vertical cliff cap with pronounced forward overhang at the lip.
-  // Hokusai's wave: height approx equals width, lip juts forward ~28% of height.
-  let t = (v - WAVE_CREST_V) / (1.0 - WAVE_CREST_V);
+
+  // --- Segment 3: crest bulb (short, thick mass) --------------------------
   let capBaseY = WAVE_BARREL_Y + WAVE_CREST_RADIUS;
-  // Modest extra rise keeps the cliff tall but not needle-thin (aspect H/W ~1.2).
-  let extraRise = (WAVE_CREST_RADIUS * 0.18) * params.heightGain;
-  let y = capBaseY + extraRise * smoothstep(0.0, 1.0, t);
-  // Strong forward overhang (cliff lip, non-collapsing): Hokusai ~28% of height.
-  let overhang = 0.75 * smoothstep(0.55, 1.0, t) * (0.4 + 0.6 * curl);
-  return vec2f(overhang, y);
+  let crestMaxY = capBaseY + (WAVE_CREST_RADIUS * 0.20) * params.heightGain;
+  if (v < WAVE_CREST_END) {
+    let a = (v - WAVE_FACE_END) / (WAVE_CREST_END - WAVE_FACE_END);
+    // Bulb: rise to the crest maximum with a slight forward bulge.
+    let y = mix(capBaseY, crestMaxY, smoothstep(0.0, 1.0, a));
+    let x = 0.06 * sin(a * 3.14159) * curlAmt;
+    return vec2f(x, y);
+  }
+
+  // --- Segment 4: forward hook --------------------------------------------
+  if (v < WAVE_HOOK_END) {
+    let a = (v - WAVE_CREST_END) / (WAVE_HOOK_END - WAVE_CREST_END);
+    // Hook reaches forward then the tip rises slightly; tip x is ~20-35% of H.
+    let hookReach = (0.28 + 0.12 * curlAmt) * (params.heightGain + 0.5);
+    let x = hookReach * smoothstep(0.0, 1.0, a);
+    let y = crestMaxY + 0.08 * params.heightGain * sin(a * 3.14159);
+    return vec2f(x, y);
+  }
+
+  // --- Segment 5: returning tongue (drops below crest max -> barrel) ------
+  let a = (v - WAVE_HOOK_END) / (1.0 - WAVE_HOOK_END);
+  let hookX = (0.28 + 0.12 * curlAmt) * (params.heightGain + 0.5);
+  // Tongue tip returns inward and DOWN past the crest max, opening negative space.
+  let tipX = hookX * (1.0 - 0.55 * a);
+  let tipY = crestMaxY - (0.45 + 0.20 * curlAmt) * (params.heightGain + 0.4) * smoothstep(0.0, 1.0, a);
+  return vec2f(tipX, tipY);
 }
 
 // How far through the break each slice of the crest is. Travelling this phase
@@ -197,8 +233,10 @@ fn waveVertex(@location(0) uv: vec2f, @builtin(instance_index) instance: u32) ->
 
   let field = sampleOceanWorld(here.position.xz);
   // The lip and the tongue are where a real breaker aerates.
-  let lip = smoothstep(WAVE_CREST_V - 0.06, WAVE_CREST_V + 0.14, uv.y);
-  let tongue = smoothstep(WAVE_CREST_V + 0.10, 1.0, uv.y);
+  // #6: foam masks now align with the new segment boundaries (crest bulb /
+  // forward hook / returning tongue) instead of the old single vertical cap.
+  let lip = smoothstep(WAVE_CREST_END - 0.04, WAVE_CREST_END + 0.08, uv.y);
+  let tongue = smoothstep(WAVE_HOOK_END - 0.02, 1.0, uv.y);
 
   var output: SurfaceOutput;
   output.position = u.viewProjection * vec4f(here.position, 1.0);
