@@ -105,9 +105,9 @@ fn waveProfile(v: f32, curl: f32, params: WaveParams) -> vec2f {
     let a = (v - WAVE_SKIRT_END) / (WAVE_FACE_END - WAVE_SKIRT_END);
     let crestY = WAVE_BARREL_Y + WAVE_CREST_RADIUS;
     let rise = pow(a, 0.70);
-    // Concave: x stays near the trough then eases forward as it climbs, leaning
-    // forward (negative relative to pure vertical) — a hollow face, not a wall.
-    let lean = 0.35 * (a * a) - 0.10 * a;
+    // Clearly concave (hollow) face: bow the mid-face inward so the silhouette
+    // reads as a scooped wall, not a straight ramp. Amplified for visibility.
+    let lean = -0.30 * sin(a * 3.14159);
     return vec2f(WAVE_TROUGH_X * pow(1.0 - a, 2.2) + lean, mix(WAVE_TROUGH_Y, crestY, rise));
   }
 
@@ -122,22 +122,23 @@ fn waveProfile(v: f32, curl: f32, params: WaveParams) -> vec2f {
     return vec2f(x, y);
   }
 
-  // --- Segment 4: forward hook --------------------------------------------
+  // --- Segment 4: forward hook (AMPLIFIED for visible barrel) --------------
   if (v < WAVE_HOOK_END) {
     let a = (v - WAVE_CREST_END) / (WAVE_HOOK_END - WAVE_CREST_END);
-    // Hook reaches forward then the tip rises slightly; tip x is ~20-35% of H.
-    let hookReach = (0.28 + 0.12 * curlAmt) * (params.heightGain + 0.5);
+    // Hook juts far forward (~60-90% of height) so the lip clearly curls over.
+    let hookReach = (0.90 + 0.50 * curlAmt) * (params.heightGain + 0.5);
     let x = hookReach * smoothstep(0.0, 1.0, a);
-    let y = crestMaxY + 0.08 * params.heightGain * sin(a * 3.14159);
+    let y = crestMaxY + 0.10 * params.heightGain * sin(a * 3.14159);
     return vec2f(x, y);
   }
 
-  // --- Segment 5: returning tongue (drops below crest max -> barrel) ------
+  // --- Segment 5: returning tongue (drops well below crest -> deep barrel) -
   let a = (v - WAVE_HOOK_END) / (1.0 - WAVE_HOOK_END);
-  let hookX = (0.28 + 0.12 * curlAmt) * (params.heightGain + 0.5);
-  // Tongue tip returns inward and DOWN past the crest max, opening negative space.
-  let tipX = hookX * (1.0 - 0.55 * a);
-  let tipY = crestMaxY - (0.45 + 0.20 * curlAmt) * (params.heightGain + 0.4) * smoothstep(0.0, 1.0, a);
+  let hookX = (0.90 + 0.50 * curlAmt) * (params.heightGain + 0.5);
+  // Tongue curls back inward AND drops far below the crest maximum, enclosing a
+  // large dark negative space (the barrel) — amplified so it is unmistakable.
+  let tipX = hookX * (1.0 - 0.75 * a);
+  let tipY = crestMaxY - (1.60 + 0.60 * curlAmt) * (params.heightGain + 0.4) * smoothstep(0.0, 1.0, a);
   return vec2f(tipX, tipY);
 }
 
