@@ -16,27 +16,78 @@ const SPRAY_WORKGROUP_SIZE = 64;
 const SPRAY_VERTEX_WGSL = `
   struct Uniforms {
     viewProjection: mat4x4f,
+    cameraPos: vec4f,
+    viewport: vec4f,
+    pointer: vec4f,
+    misc: vec4f,
+    sun: vec4f,
+    camRight: vec4f,
+    camUp: vec4f,
+    forward: vec4f,
   }
   struct Particle {
-    position: vec4f,
-    velocity: vec4f,
-    color: vec4f,
-    spin: vec4f,
+    position: vec4f,  // xyz world space, w = life (seconds remaining)
+    velocity: vec4f,  // xyz velocity, w = size
+    color: vec4f,     // rgb tint, w = alpha
+    spin: vec4f,      // x = isSpray flag, y = spin, z = spin rate, w = unused
   }
   @group(0) @binding(0) var<uniform> u: Uniforms;
   @group(0) @binding(1) var<storage, read> particles: array<Particle>;
+
   struct VSOut {
     @builtin(position) position: vec4f,
     @location(0) color: vec4f,
+    @location(1) uv: vec2f,
   }
+
+  // Two triangles forming a camera-facing quad in local [-1,1] space.
+  const QUAD = array<vec2f, 6>(
+    vec2f(-1.0, -1.0),
+    vec2f( 1.0, -1.0),
+    vec2f(-1.0,  1.0),
+    vec2f(-1.0,  1.0),
+    vec2f( 1.0, -1.0),
+    vec2f( 1.0,  1.0),
+  );
+
   @vertex
-  fn main(@builtin(instance_index) idx: u32) -> VSOut {
-    let p = particles[idx];
-    if (p.position.w <= 0.0) {
-      return VSOut(vec4f(0.0, 0.0, 0.0, 0.0), vec4f(0.0));
-    }
+  fn main(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> VSOut {
+    let p = particles[ii];
     var out: VSOut;
-    out.position = u.viewProjection * vec4f(p.position.xyz, 1.0);
+    if (p.position.w <= 0.0) {
+      out.position = vec4f(0.0, 0.0, 0.0, 0.0);
+      out.color = vec4f(0.0);
+      out.uv = vec2f(0.0);
+      return out;
+    }
+
+    let corner = QUAD[vi];
+    let angle = p.spin.y;
+    let ca = cos(angle);
+    let sa = sin(angle);
+    let rc = vec2f(corner.x * ca - corner.y * sa, corner.x * sa + corner.y * ca);
+
+    // Local billboard-space offset, in units of world-space particle size.
+    var local = rc;
+    if (p.spin.x > 0.5) {
+      // Shard: elongate along the particle's velocity, projected onto the
+      // billboard plane, so it reads as a streak rather than a dot.
+      var dir = vec3f(0.0, 1.0, 0.0);
+      let velLen = length(p.velocity.xyz);
+      if (velLen > 1e-4) { dir = p.velocity.xyz / velLen; }
+      let vRight = dot(dir, u.camRight.xyz);
+      let vUp = dot(dir, u.camUp.xyz);
+      let vlen = max(length(vec2f(vRight, vUp)), 1e-3);
+      let along = vec2f(vRight, vUp) / vlen;
+      let perp = vec2f(-along.y, along.x);
+      let comp = vec2f(dot(rc, along), dot(rc, perp));
+      local = comp.x * along * 1.9 + comp.y * perp * 0.7;
+    }
+
+    let worldOffset = (u.camRight.xyz * local.x + u.camUp.xyz * local.y) * p.velocity.w;
+    let worldPos = p.position.xyz + worldOffset;
+    out.position = u.viewProjection * vec4f(worldPos, 1.0);
+    out.uv = rc;
     out.color = p.color;
     return out;
   }
@@ -45,10 +96,17 @@ const SPRAY_FRAGMENT_WGSL = `
   struct VSOut {
     @builtin(position) position: vec4f,
     @location(0) color: vec4f,
+    @location(1) uv: vec2f,
   }
   @fragment
   fn main(in: VSOut) -> @location(0) vec4f {
-    return in.color;
+    // Hard elliptical cut: no soft radial alpha, just a flat plate with a
+    // separate keyline so it reads as woodblock ink rather than a glow.
+    let r = length(in.uv);
+    if (r > 1.0) { discard; }
+    let edge = smoothstep(0.80, 0.96, r);
+    let rgb = mix(in.color.rgb, vec3f(0.12, 0.22, 0.45), edge);
+    return vec4f(rgb, in.color.a);
   }
 `;
 
@@ -1308,7 +1366,7 @@ function createSpraySystem(sprayModule) {
     ],
   });
 
-  // Spray render pipeline: point sprites, 4x MSAA to match scene pass.
+  // Spray render pipeline: instanced billboard quads, 4x MSAA to match scene pass.
   const sprayVertexModule = device.createShaderModule({ code: SPRAY_VERTEX_WGSL });
   const sprayFragmentModule = device.createShaderModule({ code: SPRAY_FRAGMENT_WGSL });
   sprayRenderPipeline = device.createRenderPipeline({
@@ -1322,10 +1380,9 @@ function createSpraySystem(sprayModule) {
         alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha', operation: 'add' },
       }}],
     },
-    primitive: { topology: 'point-list' },
+    primitive: { topology: 'triangle-list' },
     depthStencil: { format: 'depth24plus', depthWriteEnabled: false, depthCompare: 'less' },
     multisample: { count: SAMPLE_COUNT },
-    vertexState: { pointSize: 8.0 },
   });
   sprayRenderBindGroup = device.createBindGroup({
     layout: sprayRenderPipeline.getBindGroupLayout(0),
@@ -1498,7 +1555,7 @@ function draw(now) {
   // Spray particles drawn on top of the ocean, depth-tested against it.
   scenePass.setBindGroup(0, sprayRenderBindGroup);
   scenePass.setPipeline(sprayRenderPipeline);
-  scenePass.draw(1, 8192);
+  scenePass.draw(6, MAX_PARTICLES);
   scenePass.end();
 
   const postPass = encoder.beginRenderPass({
