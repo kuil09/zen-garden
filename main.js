@@ -110,7 +110,7 @@ let moving = true;
 let pointer = [0.5, 0.5];
 let smoothPointer = [0.5, 0.5];
 let interactionEnergy = 0;
-let renderScale = window.innerWidth < 720 ? 0.66 : 0.84;
+let renderScale = window.innerWidth < 720 ? 0.84 : 0.96;
 let averageFrameTime = 16.7;
 let adaptationElapsed = 0;
 let oceanBufferIndex = 0;
@@ -854,11 +854,11 @@ function adaptQuality(delta) {
   adaptationElapsed += delta;
   if (adaptationElapsed < 2800) return;
   adaptationElapsed = 0;
+  // Only step DOWN when the frame budget is blown. We start at the target scale
+  // (0.96 desktop / 0.84 mobile), so ramping UP would only reconfigure the
+  // swapchain and read as a resize jump on load — there is no benefit.
   if (averageFrameTime > 30 && renderScale > 0.56) {
     renderScale = Math.max(0.56, renderScale - 0.07);
-    resize();
-  } else if (averageFrameTime < 18.2 && renderScale < 0.96) {
-    renderScale = Math.min(0.96, renderScale + 0.035);
     resize();
   }
 }
