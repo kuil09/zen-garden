@@ -83,22 +83,25 @@ fn waveProfile(v: f32, curl: f32, params: WaveParams) -> vec2f {
   }
   if (v < WAVE_CREST_V) {
     let a = (v - WAVE_SKIRT_END) / (WAVE_CREST_V - WAVE_SKIRT_END);
-    // Near-vertical cliff face: x barely moves while y shoots up sharply
+    // Steep cliff face leaning slightly forward (~72° from horizontal, Hokusai).
     let crestY = WAVE_BARREL_Y + WAVE_CREST_RADIUS;
-    let rise = pow(a, 0.55); // faster rise = steeper, more vertical face
+    let rise = pow(a, 0.62);
+    // Forward lean: face pushes forward as it rises (not perfectly vertical).
+    let lean = 0.55 * (a * a);
     return vec2f(
-      WAVE_TROUGH_X * pow(1.0 - a, 2.8), // much tighter x convergence = near-vertical
+      WAVE_TROUGH_X * pow(1.0 - a, 2.4) + lean, // tighter x convergence + forward lean
       mix(WAVE_TROUGH_Y, crestY, rise),
     );
   }
-  // Vertical cliff cap: face continues straight up, slight forward overhang at
-  // the very top. No curl-back, no plunge — non-collapsing Hokusai cliff.
+  // Vertical cliff cap with pronounced forward overhang at the lip.
+  // Hokusai's wave: height approx equals width, lip juts forward ~28% of height.
   let t = (v - WAVE_CREST_V) / (1.0 - WAVE_CREST_V);
   let capBaseY = WAVE_BARREL_Y + WAVE_CREST_RADIUS;
-  let extraRise = (WAVE_CREST_RADIUS * 0.42) * params.heightGain;
+  // Modest extra rise keeps the cliff tall but not needle-thin (aspect H/W ~1.2).
+  let extraRise = (WAVE_CREST_RADIUS * 0.18) * params.heightGain;
   let y = capBaseY + extraRise * smoothstep(0.0, 1.0, t);
-  // Slight forward overhang at the very top (cliff lip, not collapsing).
-  let overhang = 0.30 * smoothstep(0.65, 1.0, t) * (0.5 + 0.5 * curl);
+  // Strong forward overhang (cliff lip, non-collapsing): Hokusai ~28% of height.
+  let overhang = 0.75 * smoothstep(0.55, 1.0, t) * (0.4 + 0.6 * curl);
   return vec2f(overhang, y);
 }
 
