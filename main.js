@@ -258,6 +258,11 @@ let breakerSummary = null;
 let breakerFrameCounter = 0;
 let breakerActivity = 0;
 
+// #6 debug: ?forcebreaker=1 forces a single dominant breaker in front of the
+// camera so the waveProfile() silhouette change can be verified in isolation,
+// regardless of whether the live simulation detection happens to spawn one.
+const FORCE_BREAKER = new URLSearchParams(window.location.search).has('forcebreaker');
+
 function normalize3(vector) {
   const length = Math.hypot(vector[0], vector[1], vector[2]) || 1;
   return [vector[0] / length, vector[1] / length, vector[2] / length];
@@ -513,6 +518,15 @@ function updateBreakerAnchors(summary) {
     const dz = c.centerZ - cameraZ;
     return dx * dx + dz * dz >= MIN_BREAKER_DIST_FROM_CAMERA * MIN_BREAKER_DIST_FROM_CAMERA;
   });
+  if (FORCE_BREAKER) {
+    // Synthesize a breaking component directly ahead of the camera so a breaker
+    // is guaranteed visible for profile verification.
+    filteredComponents.push({
+      centerX: cameraWorldPos[0],
+      centerZ: cameraWorldPos[2] + 55,
+      dirX: 1, dirZ: 0, extent: 22, strength: 1,
+    });
+  }
   for (const anchor of breakerAnchors) {
     anchor.claimed = false;
     anchor.component = null;
