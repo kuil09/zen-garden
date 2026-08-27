@@ -83,26 +83,23 @@ fn waveProfile(v: f32, curl: f32, params: WaveParams) -> vec2f {
   }
   if (v < WAVE_CREST_V) {
     let a = (v - WAVE_SKIRT_END) / (WAVE_CREST_V - WAVE_SKIRT_END);
-    // Near-vertical face: x barely moves while y shoots up
+    // Near-vertical cliff face: x barely moves while y shoots up sharply
     let crestY = WAVE_BARREL_Y + WAVE_CREST_RADIUS;
-    let rise = pow(a, 0.70); // faster rise = steeper face
+    let rise = pow(a, 0.55); // faster rise = steeper, more vertical face
     return vec2f(
-      WAVE_TROUGH_X * pow(1.0 - a, 2.2), // much tighter x convergence
+      WAVE_TROUGH_X * pow(1.0 - a, 2.8), // much tighter x convergence = near-vertical
       mix(WAVE_TROUGH_Y, crestY, rise),
     );
   }
+  // Vertical cliff cap: face continues straight up, slight forward overhang at
+  // the very top. No curl-back, no plunge — non-collapsing Hokusai cliff.
   let t = (v - WAVE_CREST_V) / (1.0 - WAVE_CREST_V);
-  // Tighter, faster spiral: more theta in less v = tighter curl inward
-  let theta = params.thetaSpan * mix(0.35, 1.0, curl) * t;
-  // Radius shrinks faster = tighter tube
-  let radius = WAVE_CREST_RADIUS * (1.0 - params.taper * pow(t, 1.4));
-  // Throw: more horizontal initially, then sharp downward flick
-  let throwOut = vec2f(6.0, -4.0) * params.throwGain * curl
-    * smoothstep(0.15, 1.0, t);
-  // Additional inward curl at the very tip (t > 0.7)
-  let tipCurl = smoothstep(0.7, 0.95, t);
-  let inwardFlick = vec2f(-1.8, -1.2) * params.throwGain * curl * tipCurl;
-  return vec2f(0.0, WAVE_BARREL_Y) + radius * vec2f(sin(theta), cos(theta)) + throwOut + inwardFlick;
+  let capBaseY = WAVE_BARREL_Y + WAVE_CREST_RADIUS;
+  let extraRise = (WAVE_CREST_RADIUS * 0.42) * params.heightGain;
+  let y = capBaseY + extraRise * smoothstep(0.0, 1.0, t);
+  // Slight forward overhang at the very top (cliff lip, not collapsing).
+  let overhang = 0.30 * smoothstep(0.65, 1.0, t) * (0.5 + 0.5 * curl);
+  return vec2f(overhang, y);
 }
 
 // How far through the break each slice of the crest is. Travelling this phase
@@ -242,8 +239,8 @@ fn clawVertex(@location(0) uv: vec2f, @builtin(instance_index) instance: u32) ->
   // Claws stay large down the trailing crest even as the body tapers away.
   let clawScale = mix(bodyScale, 1.0, 0.55) * params.radius;
   let root = waveProfile(WAVE_CLAW_BASE_V, curl, params);
-  // Up and forward, following the direction the lip is already throwing water.
-  let outward = normalize(root - vec2f(0.0, WAVE_BARREL_Y) + vec2f(0.72, 0.30));
+  // Claws rise UP off the crest against the sky (Hokusai foam fingers), no plunge.
+  let outward = normalize(vec2f(0.32, 1.0));
 
   let reach = WAVE_CLAW_REACH * mix(0.5, 1.0, curl);
   let extent = uv.y * reach;
@@ -259,9 +256,9 @@ fn clawVertex(@location(0) uv: vec2f, @builtin(instance_index) instance: u32) ->
     + along * (uv.x * span + fan * scale)
     + axis * (root.x * scale + outward.x * thisExtent * clawScale)
     + vec3f(0.0, root.y * scale + outward.y * thisExtent * clawScale, 0.0);
-  // Gravity bends tips back — variable per finger
+  // Minimal gravity — claws rise, they do not plunge back down.
   let gravityVar = 0.8 + hash11(fingerIndex * 19.3 + params.phaseOffset * 23.0) * 0.4;
-  position.y -= uv.y * uv.y * 0.22 * clawScale * gravityVar;
+  position.y -= uv.y * uv.y * 0.03 * clawScale * gravityVar;
   // Slight vertical jitter for organic feel
   position.y += (hash11(fingerIndex * 31.0 + uv.y * 17.0) - 0.5) * 0.08 * clawScale;
 
