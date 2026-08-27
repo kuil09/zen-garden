@@ -88,6 +88,46 @@ struct SurfaceOutput {
   @location(7) sheetWeight: f32,
 }
 
+// ============================================================================
+// #9 — Woodblock surface language (additive foundation).
+//
+// Today the print look comes from an FBM-perturbed colour ramp (scene.wgsl)
+// plus a global Sobel edge (post.wgsl). The goal is to separate the surface into
+// explicit layers — flat colour plates, object-space flow ribbons, and
+// silhouette/occlusion/material-boundary keylines — and stop leaning on a
+// screen-space Sobel that also detects clouds and paper noise.
+//
+// This foundation adds a material/plate classifier. The actual extra render
+// target (a material-ID / plate-ID attachment) and the keyline rasterizer are
+// Phase 3 follow-ups; the classifier below is what feeds them. It deliberately
+// returns a discrete ID from geometry-derived signals, NOT from FBM, so the
+// lines/plates survive with FBM disabled (a hard #9 completion condition).
+// ============================================================================
+const MAT_SKY: f32 = 0.0;
+const MAT_DEEP: f32 = 1.0;      // trough / deep ink plate
+const MAT_BODY: f32 = 2.0;      // main wave body plate
+const MAT_FOAM: f32 = 3.0;      // aerated white plate
+const MAT_CLAW: f32 = 4.0;      // foam finger / claw plate
+
+// Discrete material id from geometry-derived signals only.
+fn classifyMaterial(foam: f32, compression: f32, sheetWeight: f32, waveHeight: f32) -> f32 {
+  if (sheetWeight >= 1.5) { return MAT_CLAW; }
+  if (foam > 0.62) { return MAT_FOAM; }
+  if (waveHeight < -0.18 && compression < 0.25) { return MAT_DEEP; }
+  return MAT_BODY;
+}
+
+// Flow-class hint (face / shoulder / hook / tongue) derived from the profile
+// coordinate, used later to orient flow ribbons/lines along T_art.
+fn flowClass(sheetCoordinates: vec2f) -> f32 {
+  // v along the cross-section: 0 skirt, mid face, high crest/tongue.
+  let v = clamp(sheetCoordinates.y, 0.0, 1.0);
+  if (v < 0.30) { return 0.0; }   // face
+  if (v < 0.55) { return 1.0; }   // shoulder
+  if (v < 0.78) { return 2.0; }   // hook
+  return 3.0;                     // tongue
+}
+
 @vertex
 fn oceanVertex(@location(0) uv: vec2f) -> SurfaceOutput {
   // The grid follows the camera and fans out toward the horizon. Sampling the
