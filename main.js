@@ -5,6 +5,7 @@ import breakersShader from './shaders/breakers.wgsl?raw';
 import sceneShader from './shaders/scene.wgsl?raw';
 import waveGeometryShader from './shaders/wave-geometry.wgsl?raw';
 import postShader from './shaders/post.wgsl?raw';
+import sprayShader from './shaders/spray.wgsl?raw';
 import { toggleOceanSound, updateBreakerPosition, setListenerPosition } from './ocean-sound.js';
 
 const canvas = document.querySelector('#ocean');
@@ -80,6 +81,17 @@ let surfaceBindGroups;
 let waveBindGroups;
 let postBindGroup;
 let oceanGrid;
+
+// ---- Spray particle system (compute spawn/update + point render) ----
+let sprayModule;
+let spraySpawnPipeline;
+let sprayUpdatePipeline;
+let sprayBuffer;
+let sprayParamsBuffer;
+let sprayCrestBuffer;
+let sprayBindGroup;
+let sprayRenderPipeline;
+let sprayRenderBindGroup;
 // Camera world position for breaker spawn filtering
 let cameraWorldPos = [0.0, 0.0, 0.0];
 let waveGrid;
@@ -528,6 +540,32 @@ function writeBreakerParams() {
   device.queue.writeBuffer(breakerParamsBuffer, 0, data);
 }
 
+// Packs active breaker crest lines into the format the spray compute shader reads.
+function writeSprayCrest() {
+  const data = new Float32Array(WAVE_INSTANCES * 16);
+  breakerAnchors.forEach((anchor, index) => {
+    const offset = index * 16;
+    const halfSpan = anchor.extent * 0.5;
+    data[offset + 0] = anchor.centerX - anchor.dirX * halfSpan;  // startX
+    data[offset + 1] = 0;                                        // startY
+    data[offset + 2] = anchor.centerZ - anchor.dirZ * halfSpan;  // startZ
+    data[offset + 3] = anchor.centerX + anchor.dirX * halfSpan;  // endX
+    data[offset + 4] = 0;                                        // endY
+    data[offset + 5] = anchor.centerZ + anchor.dirZ * halfSpan;  // endZ
+    data[offset + 6] = anchor.radius * anchor.envelope;          // radius
+    data[offset + 7] = anchor.heightGain * anchor.envelope;      // heightGain
+    data[offset + 8] = anchor.curlRate;
+    data[offset + 9] = anchor.curlWaves;
+    data[offset + 10] = anchor.phaseOffset;
+    data[offset + 11] = anchor.crestPeak;
+    data[offset + 12] = anchor.crestWidth;
+    data[offset + 13] = anchor.thetaSpan;
+    data[offset + 14] = anchor.taper;
+    data[offset + 15] = anchor.envelope;                         // envelope
+  });
+  device.queue.writeBuffer(sprayCrestBuffer, 0, data);
+}
+
 function scheduleBreakerReadback(encoder) {
   if (breakerReadbackPending) return;
   breakerReadbackPending = true;
@@ -917,13 +955,14 @@ async function initialize() {
   waveGrid = createGrid(WAVE_COLUMNS, WAVE_ROWS);
   clawGrid = createGrid(CLAW_COLUMNS, CLAW_ROWS);
 
-  const [spectralModule, dynamicModule, resolveModule, breakersModule, sceneModule, postModule] = await Promise.all([
+  const [spectralModule, dynamicModule, resolveModule, breakersModule, sceneModule, postModule, sprayModule] = await Promise.all([
     checkedModule('Spectral ocean compute', spectralShader),
     checkedModule('Dynamic water compute', dynamicShader),
     checkedModule('Ocean field resolve', resolveShader),
     checkedModule('Breaker detection', breakersShader),
     checkedModule('Ocean scene', `${sceneShader}\n${waveGeometryShader}`),
         checkedModule('HDR post process', postShader),
+    checkedModule('Spray particles', sprayShader),
   ]);
 
   const spectralLayout = device.createBindGroupLayout({
@@ -1121,6 +1160,119 @@ async function initialize() {
     addressModeV: 'clamp-to-edge',
   });
 
+  // ===== Spray particle system =====
+  // Compute layout: uniform params + crest storage (read) + particle storage (read_write).
+  const sprayLayout = device.createBindGroupLayout({
+    entries: [
+      { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
+      { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage' } },
+      { binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
+    ],
+  });
+  const sprayPipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [sprayLayout] });
+  spraySpawnPipeline = device.createComputePipeline({
+    layout: sprayPipelineLayout,
+    compute: { module: sprayModule, entryPoint: 'spawnSpray' },
+  });
+  sprayUpdatePipeline = device.createComputePipeline({
+    layout: sprayPipelineLayout,
+    compute: { module: sprayModule, entryPoint: 'updateSpray' },
+  });
+
+  // Spray parameters (elapsed, delta, spawnRate, instanceCount) + padding.
+  sprayParamsBuffer = device.createBuffer({
+    size: 32,
+    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+  });
+  // Crest data: one BreakerCrest (16 floats) per wave instance.
+  sprayCrestBuffer = device.createBuffer({
+    size: WAVE_INSTANCES * 16 * 4,
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+  });
+  // Particle storage: MAX_PARTICLES * 64 bytes (4 x vec4f).
+  sprayBuffer = device.createBuffer({
+    size: 8192 * 64,
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+  });
+  sprayBindGroup = device.createBindGroup({
+    layout: sprayLayout,
+    entries: [
+      { binding: 0, resource: { buffer: sprayParamsBuffer } },
+      { binding: 1, resource: { buffer: sprayCrestBuffer } },
+      { binding: 2, resource: { buffer: sprayBuffer } },
+    ],
+  });
+
+  // Spray render pipeline: point sprites, 4x MSAA to match scene pass.
+  const sprayVertexModule = device.createShaderModule({
+    code: `
+      struct Uniforms {
+        viewProjection: mat4x4f,
+      }
+      struct Particle {
+        position: vec4f,
+        velocity: vec4f,
+        color: vec4f,
+        spin: vec4f,
+      }
+      @group(0) @binding(0) var<uniform> u: Uniforms;
+      @group(0) @binding(1) var<storage, read> particles: array<Particle>;
+      struct VSOut {
+        @builtin(position) position: vec4f,
+        @location(0) color: vec4f,
+      }
+      @vertex
+      fn main(@builtin(instance_index) idx: u32) -> VSOut {
+        let p = particles[idx];
+        if (p.position.w <= 0.0) {
+          return VSOut(vec4f(0.0, 0.0, 0.0, 0.0), vec4f(0.0));
+        }
+        var out: VSOut;
+        out.position = u.viewProjection * vec4f(p.position.xyz, 1.0);
+        out.color = p.color;
+        return out;
+      }
+    `,
+  });
+  const sprayFragmentModule = device.createShaderModule({
+    code: `
+      struct VSOut {
+        @builtin(position) position: vec4f,
+        @location(0) color: vec4f,
+      }
+      @fragment
+      fn main(in: VSOut) -> @location(0) vec4f {
+        return in.color;
+      }
+    `,
+  });
+  sprayRenderPipeline = device.createRenderPipeline({
+    layout: 'auto',
+    vertex: {
+      module: sprayVertexModule,
+      entryPoint: 'main',
+    },
+    fragment: {
+      module: sprayFragmentModule,
+      entryPoint: 'main',
+      targets: [{ format: HDR_FORMAT, blend: {
+        color: { srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha', operation: 'add' },
+        alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha', operation: 'add' },
+      }}],
+    },
+    primitive: { topology: 'point-list' },
+    depthStencil: { format: 'depth24plus', depthWriteEnabled: false, depthCompare: 'less' },
+    multisample: { count: SAMPLE_COUNT },
+    vertexState: { pointSize: 8.0 },
+  });
+  sprayRenderBindGroup = device.createBindGroup({
+    layout: sprayRenderPipeline.getBindGroupLayout(0),
+    entries: [
+      { binding: 0, resource: { buffer: uniformBuffer } },
+      { binding: 1, resource: { buffer: sprayBuffer } },
+    ],
+  });
+
   resize();
   experience.classList.add('is-ready');
   // Reset timers right before starting render loop so first frame has elapsed ≈ 0
@@ -1258,6 +1410,18 @@ function draw(now) {
     scheduleBreakerReadback(encoder);
   }
 
+  // ===== Spray particle simulation =====
+  writeSprayCrest();
+  device.queue.writeBuffer(sprayParamsBuffer, 0, new Float32Array([
+    elapsed,
+    deltaSeconds,
+    moving ? 1.0 : 0.0,    // spawnRate
+    WAVE_INSTANCES,
+    0, 0, 0, 0,
+  ]));
+  dispatchCompute(encoder, spraySpawnPipeline, sprayBindGroup, Math.ceil(WAVE_INSTANCES / 64));
+  dispatchCompute(encoder, sprayUpdatePipeline, sprayBindGroup, Math.ceil(8192 / 64));
+
   const scenePass = encoder.beginRenderPass({
     colorAttachments: [{
       view: multisampleTexture.createView(),
@@ -1289,6 +1453,10 @@ function draw(now) {
     scenePass.setPipeline(clawPipeline);
     scenePass.drawIndexed(clawGrid.indexCount, waveInstanceCount);
   }
+  // Spray particles drawn on top of the ocean, depth-tested against it.
+  scenePass.setBindGroup(0, sprayRenderBindGroup);
+  scenePass.setPipeline(sprayRenderPipeline);
+  scenePass.draw(1, 8192);
   scenePass.end();
 
   const postPass = encoder.beginRenderPass({
