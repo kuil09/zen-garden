@@ -8,6 +8,50 @@ import postShader from './shaders/post.wgsl?raw';
 import sprayShader from './shaders/spray.wgsl?raw';
 import { toggleOceanSound, updateBreakerPosition, setListenerPosition } from './ocean-sound.js';
 
+const MAX_PARTICLES = 8192;
+const SPRAY_WORKGROUP_SIZE = 64;
+
+// Inline WGSL for the spray point-sprite render pass. Kept here (not a .wgsl
+// file) because it shares the Particle struct layout with shaders/spray.wgsl.
+const SPRAY_VERTEX_WGSL = `
+  struct Uniforms {
+    viewProjection: mat4x4f,
+  }
+  struct Particle {
+    position: vec4f,
+    velocity: vec4f,
+    color: vec4f,
+    spin: vec4f,
+  }
+  @group(0) @binding(0) var<uniform> u: Uniforms;
+  @group(0) @binding(1) var<storage, read> particles: array<Particle>;
+  struct VSOut {
+    @builtin(position) position: vec4f,
+    @location(0) color: vec4f,
+  }
+  @vertex
+  fn main(@builtin(instance_index) idx: u32) -> VSOut {
+    let p = particles[idx];
+    if (p.position.w <= 0.0) {
+      return VSOut(vec4f(0.0, 0.0, 0.0, 0.0), vec4f(0.0));
+    }
+    var out: VSOut;
+    out.position = u.viewProjection * vec4f(p.position.xyz, 1.0);
+    out.color = p.color;
+    return out;
+  }
+`;
+const SPRAY_FRAGMENT_WGSL = `
+  struct VSOut {
+    @builtin(position) position: vec4f,
+    @location(0) color: vec4f,
+  }
+  @fragment
+  fn main(in: VSOut) -> @location(0) vec4f {
+    return in.color;
+  }
+`;
+
 const canvas = document.querySelector('#ocean');
 const experience = document.querySelector('#experience');
 const motionToggle = document.querySelector('#motionToggle');
@@ -50,6 +94,8 @@ const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)
 let device;
 let context;
 let format;
+
+// ---- GPU resources: core buffers ----
 let uniformBuffer;
 let evolveParamsBuffer;
 let dynamicParamsBuffer;
@@ -58,29 +104,38 @@ let initialSpectrumBuffer;
 let fftBuffers;
 let dynamicBuffers;
 let oceanBuffers;
-let spectralPipeline;
-let fftPipeline;
-let dynamicPipeline;
-let resolvePipeline;
-let scoreBreakersPipeline;
-let reduceBreakersPipeline;
-let backgroundPipeline;
-let oceanPipeline;
-let postPipeline;
-let evolveBindGroup;
-let fftPasses;
-let dynamicBindGroups;
-let resolveBindGroups;
+
+// ---- GPU resources: breaker detection ----
 let breakerConfigBuffer;
 let breakerScoreBuffer;
 let breakerSummaryBuffer;
 let breakerStagingBuffer;
 let breakerParamsBuffer;
 let breakerBindGroups;
+
+// ---- Pipelines: compute ----
+let spectralPipeline;
+let fftPipeline;
+let dynamicPipeline;
+let resolvePipeline;
+let scoreBreakersPipeline;
+let reduceBreakersPipeline;
+let evolveBindGroup;
+let fftPasses;
+let dynamicBindGroups;
+let resolveBindGroups;
+
+// ---- Pipelines: scene render ----
+let backgroundPipeline;
+let oceanPipeline;
+let postPipeline;
+let postBindGroup;
 let surfaceBindGroups;
 let waveBindGroups;
-let postBindGroup;
 let oceanGrid;
+let waveGrid;
+let clawGrid;
+let clawPipeline;
 
 // ---- Spray particle system (compute spawn/update + point render) ----
 let sprayModule;
@@ -92,12 +147,10 @@ let sprayCrestBuffer;
 let sprayBindGroup;
 let sprayRenderPipeline;
 let sprayRenderBindGroup;
+
 // Camera world position for breaker spawn filtering
 let cameraWorldPos = [0.0, 0.0, 0.0];
-let waveGrid;
 let wavePipeline;
-let clawGrid;
-let clawPipeline;
 let sceneTexture;
 let multisampleTexture;
 let depthTexture;
@@ -904,6 +957,38 @@ async function initialize() {
 
   context = canvas.getContext('webgpu');
   format = navigator.gpu.getPreferredCanvasFormat();
+
+  createCoreBuffers();
+  createBreakerBuffers();
+  createGrids();
+
+  // Compile every shader module up front; checkedModule throws on WGSL errors.
+  const [spectralModule, dynamicModule, resolveModule, breakersModule, sceneModule, postModule, sprayModule] = await Promise.all([
+    checkedModule('Spectral ocean compute', spectralShader),
+    checkedModule('Dynamic water compute', dynamicShader),
+    checkedModule('Ocean field resolve', resolveShader),
+    checkedModule('Breaker detection', breakersShader),
+    checkedModule('Ocean scene', `${sceneShader}\n${waveGeometryShader}`),
+    checkedModule('HDR post process', postShader),
+    checkedModule('Spray particles', sprayShader),
+  ]);
+
+  createComputeAndScenePipelines({
+    spectralModule, dynamicModule, resolveModule, breakersModule, sceneModule, postModule,
+  });
+  createSpraySystem(sprayModule);
+
+  resize();
+  experience.classList.add('is-ready');
+  // Reset timers right before starting render loop so first frame has elapsed ≈ 0
+  startTime = performance.now();
+  previousFrame = performance.now();
+  frameRequest = requestAnimationFrame(draw);
+}
+
+// Core simulation buffers: uniforms + the double-buffered spectral / dynamic /
+// ocean state used by the compute chain.
+function createCoreBuffers() {
   uniformBuffer = device.createBuffer({
     size: UNIFORM_SIZE,
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
@@ -921,9 +1006,8 @@ async function initialize() {
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
   });
 
-  const initialSpectrum = createInitialSpectrum();
-  initialSpectrumBuffer = createGpuBuffer(initialSpectrum, GPUBufferUsage.STORAGE);
   const fftBufferSize = SIMULATION_CELLS * 4 * Float32Array.BYTES_PER_ELEMENT;
+  initialSpectrumBuffer = createGpuBuffer(createInitialSpectrum(), GPUBufferUsage.STORAGE);
   fftBuffers = [
     createZeroedBuffer(fftBufferSize, GPUBufferUsage.STORAGE),
     createZeroedBuffer(fftBufferSize, GPUBufferUsage.STORAGE),
@@ -938,7 +1022,10 @@ async function initialize() {
     createZeroedBuffer(oceanBufferSize, GPUBufferUsage.STORAGE),
     createZeroedBuffer(oceanBufferSize, GPUBufferUsage.STORAGE),
   ];
+}
 
+// Breaker scoring + CPU anchor readback buffers.
+function createBreakerBuffers() {
   breakerConfigBuffer = device.createBuffer({
     size: 48,
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
@@ -950,21 +1037,34 @@ async function initialize() {
     usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
   });
   breakerParamsBuffer = createZeroedBuffer(breakerAnchors.length * 20 * 4, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+}
 
+function createGrids() {
   oceanGrid = createGrid(OCEAN_COLUMNS, OCEAN_ROWS);
   waveGrid = createGrid(WAVE_COLUMNS, WAVE_ROWS);
   clawGrid = createGrid(CLAW_COLUMNS, CLAW_ROWS);
+}
 
-  const [spectralModule, dynamicModule, resolveModule, breakersModule, sceneModule, postModule, sprayModule] = await Promise.all([
-    checkedModule('Spectral ocean compute', spectralShader),
-    checkedModule('Dynamic water compute', dynamicShader),
-    checkedModule('Ocean field resolve', resolveShader),
-    checkedModule('Breaker detection', breakersShader),
-    checkedModule('Ocean scene', `${sceneShader}\n${waveGeometryShader}`),
-        checkedModule('HDR post process', postShader),
-    checkedModule('Spray particles', sprayShader),
-  ]);
+function dispatchCompute(encoder, pipeline, bindGroup, x, y = 1) {
+  const pass = encoder.beginComputePass();
+  pass.setPipeline(pipeline);
+  pass.setBindGroup(0, bindGroup);
+  pass.dispatchWorkgroups(x, y);
+  pass.end();
+}
 
+function setGrid(pass, grid) {
+  pass.setVertexBuffer(0, grid.vertexBuffer);
+  pass.setIndexBuffer(grid.indexBuffer, 'uint32');
+}
+
+// Builds every GPU pipeline the frame loop needs: the compute simulation chain
+// (spectral → fft → dynamic → resolve → breaker score/reduce) and the scene
+// render passes (background, ocean, wave sheets, claws, post).
+function createComputeAndScenePipelines(modules) {
+  const { spectralModule, dynamicModule, resolveModule, breakersModule, sceneModule, postModule } = modules;
+
+  // ---- Compute: spectral ocean + FFT ----
   const spectralLayout = device.createBindGroupLayout({
     entries: [
       { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
@@ -994,6 +1094,7 @@ async function initialize() {
   const spectralPassResult = createSpectralPasses(spectralLayout);
   fftPasses = spectralPassResult.passes;
 
+  // ---- Compute: dynamic shallow-water ----
   const dynamicLayout = device.createBindGroupLayout({
     entries: [
       { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
@@ -1014,6 +1115,7 @@ async function initialize() {
     ],
   }));
 
+  // ---- Compute: ocean resolve ----
   const resolveLayout = device.createBindGroupLayout({
     entries: [
       { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
@@ -1038,8 +1140,7 @@ async function initialize() {
       ],
     })));
 
-  // Breaker detection reads the resolved ocean + dynamic field and writes the
-  // block summary the CPU reads back.
+  // ---- Compute: breaker detection ----
   const breakerLayout = device.createBindGroupLayout({
     entries: [
       { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
@@ -1069,6 +1170,7 @@ async function initialize() {
     ],
   })));
 
+  // ---- Scene render: surface bind groups ----
   const surfaceLayout = device.createBindGroupLayout({
     entries: [
       { binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } },
@@ -1159,9 +1261,12 @@ async function initialize() {
     addressModeU: 'clamp-to-edge',
     addressModeV: 'clamp-to-edge',
   });
+}
 
-  // ===== Spray particle system =====
-  // Compute layout: uniform params + crest storage (read) + particle storage (read_write).
+// Spray particle system: compute spawn/update pipelines + point-sprite render.
+// Render WGSL is inline (SPRAY_VERTEX_WGSL / SPRAY_FRAGMENT_WGSL) because it
+// shares the Particle struct layout with shaders/spray.wgsl.
+function createSpraySystem(sprayModule) {
   const sprayLayout = device.createBindGroupLayout({
     entries: [
       { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
@@ -1191,7 +1296,7 @@ async function initialize() {
   });
   // Particle storage: MAX_PARTICLES * 64 bytes (4 x vec4f).
   sprayBuffer = device.createBuffer({
-    size: 8192 * 64,
+    size: MAX_PARTICLES * 64,
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
   });
   sprayBindGroup = device.createBindGroup({
@@ -1204,54 +1309,11 @@ async function initialize() {
   });
 
   // Spray render pipeline: point sprites, 4x MSAA to match scene pass.
-  const sprayVertexModule = device.createShaderModule({
-    code: `
-      struct Uniforms {
-        viewProjection: mat4x4f,
-      }
-      struct Particle {
-        position: vec4f,
-        velocity: vec4f,
-        color: vec4f,
-        spin: vec4f,
-      }
-      @group(0) @binding(0) var<uniform> u: Uniforms;
-      @group(0) @binding(1) var<storage, read> particles: array<Particle>;
-      struct VSOut {
-        @builtin(position) position: vec4f,
-        @location(0) color: vec4f,
-      }
-      @vertex
-      fn main(@builtin(instance_index) idx: u32) -> VSOut {
-        let p = particles[idx];
-        if (p.position.w <= 0.0) {
-          return VSOut(vec4f(0.0, 0.0, 0.0, 0.0), vec4f(0.0));
-        }
-        var out: VSOut;
-        out.position = u.viewProjection * vec4f(p.position.xyz, 1.0);
-        out.color = p.color;
-        return out;
-      }
-    `,
-  });
-  const sprayFragmentModule = device.createShaderModule({
-    code: `
-      struct VSOut {
-        @builtin(position) position: vec4f,
-        @location(0) color: vec4f,
-      }
-      @fragment
-      fn main(in: VSOut) -> @location(0) vec4f {
-        return in.color;
-      }
-    `,
-  });
+  const sprayVertexModule = device.createShaderModule({ code: SPRAY_VERTEX_WGSL });
+  const sprayFragmentModule = device.createShaderModule({ code: SPRAY_FRAGMENT_WGSL });
   sprayRenderPipeline = device.createRenderPipeline({
     layout: 'auto',
-    vertex: {
-      module: sprayVertexModule,
-      entryPoint: 'main',
-    },
+    vertex: { module: sprayVertexModule, entryPoint: 'main' },
     fragment: {
       module: sprayFragmentModule,
       entryPoint: 'main',
@@ -1272,26 +1334,6 @@ async function initialize() {
       { binding: 1, resource: { buffer: sprayBuffer } },
     ],
   });
-
-  resize();
-  experience.classList.add('is-ready');
-  // Reset timers right before starting render loop so first frame has elapsed ≈ 0
-  startTime = performance.now();
-  previousFrame = performance.now();
-  frameRequest = requestAnimationFrame(draw);
-}
-
-function dispatchCompute(encoder, pipeline, bindGroup, x, y = 1) {
-  const pass = encoder.beginComputePass();
-  pass.setPipeline(pipeline);
-  pass.setBindGroup(0, bindGroup);
-  pass.dispatchWorkgroups(x, y);
-  pass.end();
-}
-
-function setGrid(pass, grid) {
-  pass.setVertexBuffer(0, grid.vertexBuffer);
-  pass.setIndexBuffer(grid.indexBuffer, 'uint32');
 }
 
 function draw(now) {
@@ -1419,8 +1461,8 @@ function draw(now) {
     WAVE_INSTANCES,
     0, 0, 0, 0,
   ]));
-  dispatchCompute(encoder, spraySpawnPipeline, sprayBindGroup, Math.ceil(WAVE_INSTANCES / 64));
-  dispatchCompute(encoder, sprayUpdatePipeline, sprayBindGroup, Math.ceil(8192 / 64));
+  dispatchCompute(encoder, spraySpawnPipeline, sprayBindGroup, Math.ceil(WAVE_INSTANCES / SPRAY_WORKGROUP_SIZE));
+  dispatchCompute(encoder, sprayUpdatePipeline, sprayBindGroup, Math.ceil(MAX_PARTICLES / SPRAY_WORKGROUP_SIZE));
 
   const scenePass = encoder.beginRenderPass({
     colorAttachments: [{
