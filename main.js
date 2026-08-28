@@ -755,7 +755,7 @@ function updateBreakerAnchors(summary) {
     const dz = c.centerZ - cameraZ;
     return dx * dx + dz * dz >= MIN_BREAKER_DIST_FROM_CAMERA * MIN_BREAKER_DIST_FROM_CAMERA;
   });
-  if (FORCE_BREAKER) {  // ?hero is now handled by shader params, not forced spawn  // ?test=1은 자연스러운 스폰 유지
+  if (FORCE_BREAKER || DEV.test) {  // ?hero is now handled by shader params, not forced spawn  // ?test=1은 자연스러운 스폰 유지
     // Synthesize a breaking component directly ahead of the camera so a breaker
     // is guaranteed visible (forcebreaker: verify profile; hero: deterministic capture).
     filteredComponents.push({
