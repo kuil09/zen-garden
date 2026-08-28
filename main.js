@@ -402,6 +402,7 @@ let breakerScoreBuffer;
 let breakerSummaryBuffer;
 let breakerStagingBuffer;
 let breakerParamsBuffer;
+let foamFingerBuffer;
 let breakerBindGroups;
 
 // ---- Pipelines: compute ----
@@ -889,6 +890,36 @@ function smoothBreakerAnchors(deltaSeconds) {
     activity += anchor.envelope;
   }
   breakerActivity = activity / breakerAnchors.length;
+}
+
+
+// #8 FoamFinger — generate 2-3 fingers per active breaker and pack into buffer.
+const MAX_FINGERS = 16;
+function writeFoamFingers() {
+  const data = new Float32Array(MAX_FINGERS * 16);
+  let count = 0;
+  breakerAnchors.forEach((anchor) => {
+    if (anchor.envelope < 0.01 || count >= MAX_FINGERS - 2) return;
+    const baseSeed = anchor.phaseOffset || 0;
+    const r = anchor.radius;
+    // Primary finger at hook/tongue transition
+    let off = count * 16;
+    data[off+0] = 0.72; data[off+1] = 0.78; data[off+2] = -1; data[off+3] = 0;
+    data[off+4] = 0.3; data[off+5] = 0.4; data[off+6] = r*0.6; data[off+7] = 0.012;
+    data[off+8] = 0.5; data[off+9] = 0.7; data[off+10] = 0.1; data[off+11] = baseSeed;
+    data[off+12] = baseSeed; data[off+13] = 1.0; data[off+14] = 0; data[off+15] = 0;
+    count++;
+    if (count >= MAX_FINGERS) return;
+    // Secondary finger
+    off = count * 16;
+    data[off+0] = 0.75; data[off+1] = 0.82; data[off+2] = 0; data[off+3] = 1;
+    data[off+4] = 0.5; data[off+5] = 0.6; data[off+6] = r*0.35; data[off+7] = 0.008;
+    data[off+8] = 0.7; data[off+9] = 0.5; data[off+10] = 0.2; data[off+11] = baseSeed+0.3;
+    data[off+12] = baseSeed+0.3; data[off+13] = 0.8; data[off+14] = 0; data[off+15] = 0;
+    count++;
+  });
+  device.queue.writeBuffer(foamFingerBuffer, 0, data);
+  return count;
 }
 
 function writeBreakerParams() {
@@ -1389,6 +1420,7 @@ function createBreakerBuffers() {
     usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
   });
   breakerParamsBuffer = createZeroedBuffer(breakerAnchors.length * 40 * 4, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+  foamFingerBuffer = createZeroedBuffer(16 * 16 * 4, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST); // 16 fingers max, 16 floats each
 }
 
 function createGrids() {
@@ -1813,6 +1845,7 @@ function draw(now) {
 
   // ===== Spray particle simulation =====
   writeSprayCrest();
+  writeFoamFingers();
   device.queue.writeBuffer(sprayParamsBuffer, 0, new Float32Array([
     elapsed,
     deltaSeconds,

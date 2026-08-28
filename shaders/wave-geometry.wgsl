@@ -503,3 +503,26 @@ fn foamFingerWidth(finger: FoamFinger, t: f32) -> f32 {
   let taper = mix(1.0, finger.shapeB.y, clamp(t, 0.0, 1.0));
   return max(finger.shapeA.w * taper, 0.0015);
 }
+
+// #8 FoamFinger vertex entry point — renders foam ribbons as geometry.
+// Reads from foamFingers storage buffer and uses foamFingerPoint() to
+// generate the ribbon centreline.
+@group(0) @binding(5) var<storage, read> foamFingers: array<FoamFinger>;
+
+@vertex
+fn foamVertex(@location(0) uv: vec2f, @builtin(instance_index) instance: u32) -> SurfaceOutput {
+  let finger = foamFingers[instance];
+  // For now, use a simple quad expansion; real ribbon needs more vertices.
+  // This is a minimal scaffold to verify the pipeline connection.
+  var output: SurfaceOutput;
+  output.position = vec4f(0.0, 0.0, 0.0, 1.0);
+  output.worldPosition = vec3f(0.0);
+  output.normal = vec3f(0.0, 1.0, 0.0);
+  output.fieldCoordinates = vec2f(0.0);
+  output.foam = 1.0;
+  output.compression = 0.0;
+  output.waveHeight = 0.0;
+  output.sheetCoordinates = uv;
+  output.sheetWeight = 0.0;
+  return output;
+}
