@@ -295,19 +295,6 @@ fn waveSample(uv: vec2f, params: WaveParams, time: f32) -> WaveSample {
   let basePos = params.originA + along * (uv.x * span) + axis * (profile.x * scale) + vec3f(0.0, profile.y * scale, 0.0);
   let tangentU = posU - basePos;
   let tangentV = posV - basePos;
-
-  var normal = normalize(cross(tangentV, tangentU));
-  if (length(tangentU) < 1e-6 || length(tangentV) < 1e-6) {
-    normal = vec3f(0.0, 1.0, 0.0);
-  }
-
-  // Wave thickness proportional to radius
-  let thickness = 0.6 * params.radius;
-
-  var position = params.originA
-    + along * (uv.x * span)
-    + axis * (profile.x * scale)
-    + vec3f(0.0, profile.y * scale, 0.0);
   position += normal * ((uv.y - 0.5) * thickness);  // Extrude along normal for thickness
 
   let field = sampleOceanWorld(position.xz);
