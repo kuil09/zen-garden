@@ -755,7 +755,7 @@ function updateBreakerAnchors(summary) {
     const dz = c.centerZ - cameraZ;
     return dx * dx + dz * dz >= MIN_BREAKER_DIST_FROM_CAMERA * MIN_BREAKER_DIST_FROM_CAMERA;
   });
-  if (FORCE_BREAKER || DEV.hero || DEV.test) {
+  if (FORCE_BREAKER || DEV.hero) {  // ?test=1은 자연스러운 스폰 유지
     // Synthesize a breaking component directly ahead of the camera so a breaker
     // is guaranteed visible (forcebreaker: verify profile; hero: deterministic capture).
     filteredComponents.push({
@@ -835,11 +835,10 @@ function updateBreakerAnchors(summary) {
   // Test-mode live overrides: sliders (?test) replace simulation-derived targets so
   // each art value can be tuned by eye. Null fields keep their default.
   if (TEST.active) {
-    const a = breakerAnchors.find((x) => x.component) || breakerAnchors[0];
-    if (a) {
-      // Bypass envelope growth so the test wave appears instantly and stays stable.
-      a.envelope = 1;
-      a.targetEnvelope = 1;
+    // Apply overrides to ALL claimed anchors so sliders affect every wave
+    breakerAnchors.forEach(a => {
+      if (!a.component) return;
+      // Keep natural envelope (spawn/crash cycle)
       if (TEST.heightGain != null) a.targetHeightGain = TEST.heightGain;
       if (TEST.radius != null) a.targetRadius = TEST.radius;
       if (TEST.crestPeak != null) a.targetCrestPeak = TEST.crestPeak;
@@ -852,7 +851,7 @@ function updateBreakerAnchors(summary) {
       // hook/tongue scales feed the shader via debugMode.y/z (see waveProfile)
       DEV._hookScale = TEST.hookScale;
       DEV._tongueScale = TEST.tongueScale;
-    }
+    });
   }
 }
 
