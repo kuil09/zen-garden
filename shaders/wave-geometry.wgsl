@@ -473,6 +473,8 @@ struct FoamFinger {
   shapeB: vec4f,
   // deterministic seed and visibility envelope
   life: vec4f,
+  // approximate world position of the root (computed by JS)
+  worldPos: vec4f,
 }
 
 // Cubic Bézier ribbon centreline for one finger, evaluated at parameter t.
@@ -513,14 +515,12 @@ fn foamFingerWidth(finger: FoamFinger, t: f32) -> f32 {
 @vertex
 fn foamVertex(@location(0) uv: vec2f, @builtin(instance_index) instance: u32) -> SurfaceOutput {
   let finger = foamFingers[instance];
-  // Reconstruct profile position from rootU/rootV on the wave sheet.
-  // For simplicity, place fingers at a fixed offset from the crest line.
   let t = uv.x;  // parameter along finger (0=root, 1=tip)
   let s = uv.y;  // side offset (-1..1)
-  // Use foamFingerPoint to get 3D position on the ribbon centreline.
-  // Profile position approximated at rootU/rootV.
-  let profilePos = vec3f(finger.root.x * 10.0, 1.5, finger.root.y * 10.0);
-  let crestTangent = vec3f(1.0, 0.0, 0.0);
+  // Use worldPos from JS (approximate position on the wave sheet).
+  let profilePos = finger.worldPos.xyz;
+  // estimate crest tangent from world position change
+  let crestTangent = normalize(vec3f(1.0, 0.0, 0.1));
   let centre = foamFingerPoint(finger, profilePos, crestTangent, t);
   let width = foamFingerWidth(finger, t);
   let side = normalize(cross(crestTangent, vec3f(0.0, 1.0, 0.0)));

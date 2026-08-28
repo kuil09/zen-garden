@@ -923,15 +923,17 @@ function writeFoamFingers() {
     const baseSeed = anchor.phaseOffset || 0;
     const r = anchor.radius;
     // Primary finger at hook/tongue transition
-    let off = count * 16;
+    let off = count * 20;
     data[off+0] = 0.72; data[off+1] = 0.78; data[off+2] = -1; data[off+3] = 0;
     data[off+4] = 0.3; data[off+5] = 0.4; data[off+6] = r*0.6; data[off+7] = 0.012;
     data[off+8] = 0.5; data[off+9] = 0.7; data[off+10] = 0.1; data[off+11] = baseSeed;
     data[off+12] = baseSeed; data[off+13] = 1.0; data[off+14] = 0; data[off+15] = 0;
+    // worldPos: approximate position (camera-facing)
+    data[off+16] = anchor.centerX; data[off+17] = anchor.heightGain * 2.0; data[off+18] = anchor.centerZ; data[off+19] = 0;
     count++;
     if (count >= MAX_FINGERS) return;
     // Secondary finger
-    off = count * 16;
+    off = count * 20;
     data[off+0] = 0.75; data[off+1] = 0.82; data[off+2] = 0; data[off+3] = 1;
     data[off+4] = 0.5; data[off+5] = 0.6; data[off+6] = r*0.35; data[off+7] = 0.008;
     data[off+8] = 0.7; data[off+9] = 0.5; data[off+10] = 0.2; data[off+11] = baseSeed+0.3;

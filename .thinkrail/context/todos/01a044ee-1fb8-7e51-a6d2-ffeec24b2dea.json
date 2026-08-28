@@ -3,89 +3,149 @@
   "todos": [],
   "groups": [
     {
-      "id": "g_9ac42e7c2bfb",
-      "title": "테스트 모드 슬라이더 패널 (?test)",
+      "id": "g_bec5a758f465",
+      "title": "#8 FoamFinger 정석 완성",
       "todos": [
         {
-          "id": "t_95fa0fb466fb",
-          "title": "슬라이더 패널 구현 (?test 플래그 + HTML range 주입)",
+          "id": "t_64a4bfc0014c",
+          "title": "foamVertex 리본 지오메트리 실제 구현",
           "status": "in_progress",
           "origin": "agent",
-          "createdAt": "2026-08-28T01:30:10.154Z",
-          "updatedAt": "2026-08-28T01:30:10.154Z",
-          "note": "breaker art 파라미터 + hook/tongue 스케일을 라이브 조정"
+          "createdAt": "2026-08-28T04:35:16.448Z",
+          "updatedAt": "2026-08-28T04:35:16.448Z",
+          "note": "foamFingerPoint()을 사용하는 proper ribbon으로 개선"
         },
         {
-          "id": "t_356b76f95163",
-          "title": "waveProfile hook/tongue 스케일 유니폼 연결",
+          "id": "t_77e23be24e75",
+          "title": "foamPipeline triangle-strip → proper ribbon 렌더링",
           "status": "pending",
           "origin": "agent",
-          "createdAt": "2026-08-28T01:30:10.154Z",
-          "updatedAt": "2026-08-28T01:30:10.154Z",
-          "note": "waveProfile에 u.debugMode.y/z 훅/혀 스케일 적용"
+          "createdAt": "2026-08-28T04:35:16.448Z",
+          "updatedAt": "2026-08-28T04:35:16.448Z",
+          "note": "현재 4 verts per instance, 실제 리본으로 확장"
         },
         {
-          "id": "t_f176e3f7bb17",
-          "title": "TEST 오버라이드를 breaker 타깃에 반영",
+          "id": "t_1a1f3d59af8a",
+          "title": "테스트 모드 슬라이더로 폼 튜닝",
           "status": "pending",
           "origin": "agent",
-          "createdAt": "2026-08-28T01:30:10.154Z",
-          "updatedAt": "2026-08-28T01:30:10.154Z",
-          "note": "updateBreakerAnchors에 TEST 오버라이드 적용"
+          "createdAt": "2026-08-28T04:35:16.448Z",
+          "updatedAt": "2026-08-28T04:35:16.448Z",
+          "note": "?test=1에서 폼 클로 시각화 확인"
         }
       ]
     },
     {
-      "id": "g_dd7e094335cd",
-      "title": "Hero Wave 실제 연결 (#10)",
+      "id": "g_80fcb2c078ce",
+      "title": "#9 Woodblock 실제 적용",
       "todos": [
         {
-          "id": "t_2219e4fcd388",
-          "title": "#10 Hero Wave placement 연결",
+          "id": "t_4187b2af42ad",
+          "title": "classifyMaterial()을 surfaceFragment에 실제 적용",
           "status": "pending",
           "origin": "agent",
-          "createdAt": "2026-08-28T01:30:10.154Z",
-          "updatedAt": "2026-08-28T01:30:10.154Z",
-          "note": "heroArtParams가 placement를 실제 구동, ?hero 기본 동작"
+          "createdAt": "2026-08-28T04:35:16.448Z",
+          "updatedAt": "2026-08-28T04:35:16.448Z",
+          "note": "debug 모드가 아닌 실제 재질 결정으로 사용"
         },
         {
-          "id": "t_0ae4c1c3cdd7",
-          "title": "phase 슬라이더 노출",
+          "id": "t_9081aa7b68a7",
+          "title": "flowClass()으로 흐름선 방향 적용",
           "status": "pending",
           "origin": "agent",
-          "createdAt": "2026-08-28T01:30:10.154Z",
-          "updatedAt": "2026-08-28T01:30:10.154Z",
-          "note": "테스트 모드에서 phase 슬라이더 노출"
+          "createdAt": "2026-08-28T04:35:16.448Z",
+          "updatedAt": "2026-08-28T04:35:16.448Z",
+          "note": "surfaceFragment의 level 계산에 flowClass 통합"
+        },
+        {
+          "id": "t_fc1db9299350",
+          "title": "테스트 모드로 재질 ID 확인",
+          "status": "pending",
+          "origin": "agent",
+          "createdAt": "2026-08-28T04:35:16.448Z",
+          "updatedAt": "2026-08-28T04:35:16.448Z",
+          "note": "?debug=regions로 재질 밴드 시각화"
         }
       ]
     },
     {
-      "id": "g_2c185c7e0418",
-      "title": "#7/#8/#9/#12 연결 계획 (GPU 검증 필요)",
+      "id": "g_a5c910f298d2",
+      "title": "#12 Fracture 정석 완성",
       "todos": [
         {
-          "id": "t_b35d18bce8a3",
-          "title": "연결 계획 수립 및 부분 시작",
+          "id": "t_2201a4df5eec",
+          "title": "fractureGate()을 waveVertex에 제대로 적용",
           "status": "pending",
           "origin": "agent",
-          "createdAt": "2026-08-28T01:30:10.154Z",
-          "updatedAt": "2026-08-28T01:30:10.154Z",
-          "note": "각 요소 파이프라인 연결 순서/리스크 문서화, 부분 스캐폴딩"
+          "createdAt": "2026-08-28T04:35:16.448Z",
+          "updatedAt": "2026-08-28T04:35:16.448Z",
+          "note": "현재 기본 오프셋만 적용, 실제 메소 파쇄 지오메트리로"
+        },
+        {
+          "id": "t_7d8ca363cc61",
+          "title": "fractureFeatures JS 생성 로직 개선",
+          "status": "pending",
+          "origin": "agent",
+          "createdAt": "2026-08-28T04:35:16.448Z",
+          "updatedAt": "2026-08-28T04:35:16.448Z",
+          "note": "단순 하드코딩이 아닌 파도 프로파일 기반 동적 생성"
+        },
+        {
+          "id": "t_fbeb7be4f177",
+          "title": "테스트 모드로 파쇄 시각화",
+          "status": "pending",
+          "origin": "agent",
+          "createdAt": "2026-08-28T04:35:16.448Z",
+          "updatedAt": "2026-08-28T04:35:16.448Z",
+          "note": "?debug=regions와 함께 파쇄 게이트 확인"
         }
       ]
     },
     {
-      "id": "g_674cfd15fc03",
+      "id": "g_cc24f70f6ba9",
+      "title": "#13 Epic: 실루엣 우선 3D 아트 디렉션",
+      "todos": [
+        {
+          "id": "t_bd2eebb69fac",
+          "title": "모든 요소 연결 상태에서 전체 실루엣 튜닝",
+          "status": "pending",
+          "origin": "agent",
+          "createdAt": "2026-08-28T04:35:16.448Z",
+          "updatedAt": "2026-08-28T04:35:16.448Z",
+          "note": "테스트 모드 슬라이더로 홀리스틱 튜닝"
+        },
+        {
+          "id": "t_a1e5353f1d3b",
+          "title": "WebGPU 환경에서 시각적 검증",
+          "status": "pending",
+          "origin": "agent",
+          "createdAt": "2026-08-28T04:35:16.448Z",
+          "updatedAt": "2026-08-28T04:35:16.448Z",
+          "note": "로컬 npm run dev 후 브라우저 확인 (필수)"
+        }
+      ]
+    },
+    {
+      "id": "g_f2782bf3423d",
       "title": "검증 및 main force push",
       "todos": [
         {
-          "id": "t_b12788aa2c4c",
-          "title": "검증 후 main force push",
+          "id": "t_61ae6a37113b",
+          "title": "JS 구문 검사 + WGSL brace/paren 균형",
           "status": "pending",
           "origin": "agent",
-          "createdAt": "2026-08-28T01:30:10.154Z",
-          "updatedAt": "2026-08-28T01:30:10.154Z",
-          "note": "node --check + WGSL brace, main 병합 후 force push"
+          "createdAt": "2026-08-28T04:35:16.448Z",
+          "updatedAt": "2026-08-28T04:35:16.448Z",
+          "note": "매 변경 시 자동 검증"
+        },
+        {
+          "id": "t_87add878427a",
+          "title": "main 병합 및 force push",
+          "status": "pending",
+          "origin": "agent",
+          "createdAt": "2026-08-28T04:35:16.448Z",
+          "updatedAt": "2026-08-28T04:35:16.448Z",
+          "note": "origin/main 동기화 확인"
         }
       ]
     }
