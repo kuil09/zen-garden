@@ -332,6 +332,7 @@ const breakerAnchors = Array.from({ length: 3 }, (_, index) => ({
 }));
 let breakerReadbackPending = false;
 let breakerSummary = null;
+let breakerDiagFrame = 0;
 let breakerFrameCounter = 0;
 let breakerActivity = 0;
 
@@ -672,6 +673,21 @@ function updateBreakerAnchors(summary) {
     anchor.targetDetailGain = Math.min(1.5, (0.7 + 0.6 * relative) * (1.0 + (rand() - 0.5) * 0.12));
   }
 
+  // Breaker pipeline diagnostics: prints ~1/sec when the debug panel is on so
+  // the failing stage (detect -> camera filter -> anchor claim -> envelope) is
+  // visible in the console.
+  if (DEV.debug > 0.5) {
+    breakerDiagFrame += 1;
+    if (breakerDiagFrame % 60 === 0) {
+      const claimed = breakerAnchors.filter((a) => a.component).length;
+      const sample = components.slice(0, 3).map((c) =>
+        `(${c.centerX.toFixed(0)},${c.centerZ.toFixed(0)}) s=${c.strength.toFixed(2)}`).join(' ');
+      console.log(
+        `[breaker] 감지=${components.length} 거리필터통과=${filteredComponents.length} 앵커획득=${claimed} envelope=[${breakerAnchors.map((a) => a.envelope.toFixed(2)).join(', ')}]`,
+        components.length ? `최대컴포넌트: ${sample}` : '컴포넌트 없음 — GPU 감지 실패'
+      );
+    }
+  }
 }
 
 function smoothBreakerAnchors(deltaSeconds) {
