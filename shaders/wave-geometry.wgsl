@@ -76,11 +76,11 @@ fn waveParams(instance: u32) -> WaveParams {
   params.curlWaves = placed.params.z;
   params.detailGain = placed.extras.y;
   params.phaseOffset = placed.params.w;
-  // Extract CrestCurve from packed fields (curve0..3 = p0..p3.xy, curve4 = shape)
-  params.curve.p0 = placed.curve0.xy;
-  params.curve.p1 = placed.curve1.xy;
-  params.curve.p2 = placed.curve2.xy;
-  params.curve.p3 = placed.curve3.xy;
+  // Extract CrestCurve from packed fields (curve0..3 = p0..p3, curve4 = shape)
+  params.curve.p0 = placed.curve0;
+  params.curve.p1 = placed.curve1;
+  params.curve.p2 = placed.curve2;
+  params.curve.p3 = placed.curve3;
   params.curve.shape = placed.curve4;
   return params;
 }
