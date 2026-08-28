@@ -288,7 +288,6 @@ fn waveSample(uv: vec2f, params: WaveParams, time: f32) -> WaveSample {
   let profileU = waveProfile(uv.y, curl, params);
   let posU = params.originA + along * (uPlus * span) + axis * (profileU.x * scale) + vec3f(0.0, profileU.y * scale, 0.0);
 
-  let vPlus = clamp(uv.y + 1.0/200.0, 0.0, 1.0);
   let profileV = waveProfile(vPlus, curl, params);
   let posV = params.originA + along * (uv.x * span) + axis * (profileV.x * scale) + vec3f(0.0, profileV.y * scale, 0.0);
 
