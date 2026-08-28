@@ -838,7 +838,9 @@ function updateBreakerAnchors(summary) {
     // Apply overrides to ALL claimed anchors so sliders affect every wave
     breakerAnchors.forEach(a => {
       if (!a.component) return;
-      // Keep natural envelope (spawn/crash cycle)
+      // In test mode, make the wave appear instantly (envelope = 1)
+      a.envelope = 1;
+      a.targetEnvelope = 1;
       if (TEST.heightGain != null) a.targetHeightGain = TEST.heightGain;
       if (TEST.radius != null) a.targetRadius = TEST.radius;
       if (TEST.crestPeak != null) a.targetCrestPeak = TEST.crestPeak;
