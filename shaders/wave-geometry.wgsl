@@ -271,7 +271,7 @@ fn waveSample(uv: vec2f, params: WaveParams, time: f32) -> WaveSample {
   let profile = waveProfile(uv.y, curl, params);
 
   // Compute base position on the wave surface
-  let basePos = params.originA
+  var basePos = params.originA
     + along * (uv.x * span)
     + axis * (profile.x * scale)
     + vec3f(0.0, profile.y * scale, 0.0);
