@@ -9,19 +9,19 @@
         {
           "id": "t_64a4bfc0014c",
           "title": "foamVertex 리본 지오메트리 실제 구현",
-          "status": "in_progress",
+          "status": "done",
           "origin": "agent",
           "createdAt": "2026-08-28T04:35:16.448Z",
-          "updatedAt": "2026-08-28T04:35:16.448Z",
+          "updatedAt": "2026-08-28T04:37:34.937Z",
           "note": "foamFingerPoint()을 사용하는 proper ribbon으로 개선"
         },
         {
           "id": "t_77e23be24e75",
           "title": "foamPipeline triangle-strip → proper ribbon 렌더링",
-          "status": "pending",
+          "status": "in_progress",
           "origin": "agent",
           "createdAt": "2026-08-28T04:35:16.448Z",
-          "updatedAt": "2026-08-28T04:35:16.448Z",
+          "updatedAt": "2026-08-28T04:37:56.298Z",
           "note": "현재 4 verts per instance, 실제 리본으로 확장"
         },
         {

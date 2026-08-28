@@ -303,6 +303,10 @@ fn surfaceFragment(input: SurfaceOutput) -> @location(0) vec4f {
     return vec4f(clawColor, 1.0);
   }
 
+  // Material classification drives the plate, not just profile coordinate.
+  let material = classifyMaterial(input.foam, input.compression, input.sheetWeight, input.waveHeight);
+  let flow = flowClass(input.sheetCoordinates);
+
   // The plate a surface belongs to is decided by where it sits on the wave, not
   // by a light source. On the breaker the profile coordinate does that directly:
   // deep ink at the trough, pale plate up at the lip.
@@ -310,12 +314,16 @@ fn surfaceFragment(input: SurfaceOutput) -> @location(0) vec4f {
   let sky = saturate(normal.y * 0.5 + 0.5);
   var level: f32;
   if (onSheet) {
+    // Base level from profile, adjusted by material
     level = mix(0.08, 0.92, pow(saturate(input.sheetCoordinates.y), 0.72));
+    if (material < 0.4) { level = mix(level, 0.05, 0.7); }      // DEEP → darker
+    else if (material < 1.2) { level = mix(level, 0.45, 0.3); } // BODY → slightly lighter
+    else if (material < 2.2) { level = 1.0; }                // FOAM → paper white
+    else { level = mix(level, 0.92, 0.5); }                    // CLAW → lighter
     level = level * 0.80 + sun * 0.10 + sky * 0.10;
-    // Contours that run with the water. Nudging the level across a plate boundary
-    // is what produces the streaked bands the print draws inside the wave.
-    let flow = fbm(input.sheetCoordinates * vec2f(2.6, 5.4) + vec2f(0.0, 3.1));
-    level += (flow - 0.5) * 0.26;
+    // Flow lines: nudge level along flow direction
+    let flowNoise = fbm(input.sheetCoordinates * vec2f(2.6, 5.4) + vec2f(0.0, 3.1));
+    level += (flowNoise - 0.5) * 0.26 * (1.0 - abs(flow - 1.5) * 0.5);
   } else {
     // The spectral field only moves the sea by a metre or so, so map that range
     // across the whole ramp; otherwise every distant plate prints the same tone.
