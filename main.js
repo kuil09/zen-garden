@@ -177,146 +177,46 @@ const DEV = {
   test: false,      // ?test=1 => live slider panel for empirical tuning
 };
 
-// Test-mode live overrides. Sliders write these; they replace the simulation-
-// derived breaker targets so each value can be tuned by eye. Null = use default.
-const TEST = {
-  active: false,
-  heightGain: null, crestPeak: null, crestWidth: null,
-  curlWaves: null, taper: null, thetaSpan: null, throwGain: null, detailGain: null,
-  radius: null, hookScale: 0, tongueScale: 0,
-};
-
 function parseDevParams() {
   const q = new URLSearchParams(window.location.search);
   if (q.has('debug')) DEV.debug = q.get('debug') === 'regions' ? 1 : (parseInt(q.get('debug'), 10) || 0);
-  // ?test=1: slider panel + parameter overrides on natural breakers
-  // (no forced breaker — the simulation spawns/crashes waves naturally)
+  // ?test=1: debug panel (region overlay checkbox + legend)
   if (q.has('test')) DEV.test = q.get('test') === '1' || q.get('test') === 'true';
-  TEST.active = DEV.test;
 }
 
-// Build a live slider panel for empirical art-direction tuning. Injected when
-// ?test=1 is present. All strings use single quotes to avoid JSON escaping
-// issues inside the edit tool.
+// Debug panel: region-overlay checkbox + color legend. Injected when ?test=1.
 function buildTestPanel() {
   const panel = document.createElement('div');
-  panel.style.cssText = 'position:fixed;top:10px;right:10px;width:280px;max-height:90vh;overflow-y:auto;background:rgba(0,0,0,0.85);color:#eee;padding:10px;border-radius:8px;font:12px/1.4 monospace;z-index:9999;';
+  panel.style.cssText = 'position:fixed;top:10px;right:10px;width:250px;background:rgba(0,0,0,0.85);color:#eee;padding:10px;border-radius:8px;font:12px/1.4 monospace;z-index:9999;';
 
   const title = document.createElement('b');
-  title.textContent = '🎨 art-direction test mode';
+  title.textContent = '🎨 디버그 패널';
   panel.appendChild(title);
 
-  panel.appendChild(document.createElement('br'));
-  const sub = document.createElement('small');
-  sub.textContent = '?test=1 — 슬라이더로 실시간 튜닝';
-  panel.appendChild(sub);
-
-  // Debug regions checkbox
+  // Region overlay checkbox
   const debugRow = document.createElement('div');
-  debugRow.style.marginTop = '6px';
+  debugRow.style.marginTop = '8px';
   const debugCheck = document.createElement('input');
   debugCheck.type = 'checkbox';
   debugCheck.checked = DEV.debug > 0.5;
-  debugCheck.style.marginRight = '4px';
+  debugCheck.style.marginRight = '6px';
   debugCheck.onchange = () => { DEV.debug = debugCheck.checked ? 1 : 0; };
   debugRow.appendChild(debugCheck);
   const debugLabel = document.createElement('label');
-  debugLabel.textContent = '?debug=regions (색 라벨링)';
+  debugLabel.textContent = '파도 단면 영역 색상 표시';
   debugLabel.style.fontSize = '11px';
   debugRow.appendChild(debugLabel);
   panel.appendChild(debugRow);
 
-  // Legend for ?debug=regions
+  // Color legend for the region overlay
   const legend = document.createElement('div');
   legend.style.cssText = 'margin-top:8px;padding:6px;border:1px solid #555;border-radius:4px;font-size:11px;';
-  legend.innerHTML = '<b>?debug=regions</b> 색 범례:<br>' +
-    '<span style="color:#2d73ff">■</span> face (0.00-0.40)<br>' +
-    '<span style="color:#fff">■</span> crest bulb (0.40-0.52)<br>' +
-    '<span style="color:#ffea14">■</span> hook (0.52-0.74)<br>' +
-    '<span style="color:#ff4d33">■</span> tongue (0.74-1.00)<br>' +
-    '<hr style="border-color:#444;margin:4px 0">' +
-    '<b>material ID</b> (debug+material):<br>' +
-    '<span style="color:#204bd1">■</span> DEEP<br>' +
-    '<span style="color:#37b34d">■</span> BODY<br>' +
-    '<span style="color:#fff">■</span> FOAM<br>' +
-    '<span style="color:#ffe01a">■</span> CLAW';
+  legend.innerHTML =
+    '<span style="color:#2d73ff">■</span> face — 물결 앞면<br>' +
+    '<span style="color:#fff">■</span> crest — 파도 꼭대기<br>' +
+    '<span style="color:#ffea14">■</span> hook — 말려 들어간 입술<br>' +
+    '<span style="color:#ff4d33">■</span> tongue — 되감기는 혀';
   panel.appendChild(legend);
-
-  const hr = document.createElement('hr');
-  hr.style.borderColor = '#444';
-  panel.appendChild(hr);
-
-  // 슬라이더 설정 (함수 내 closure로 유지)
-  const SLIDER_CFGS = [
-    { key: 'heightGain', label: '높이(heightGain)', min: 0, max: 2, step: 0.01, def: 1.0 },
-    { key: 'radius', label: '반경(radius)', min: 2, max: 12, step: 0.1, def: 8 },
-    { key: 'crestPeak', label: '능선위치(crestPeak)', min: 0, max: 1, step: 0.01, def: 0.55 },
-    { key: 'crestWidth', label: '능선폭(crestWidth)', min: 0.2, max: 1, step: 0.01, def: 0.55 },
-    { key: 'curlWaves', label: '말림횟수(curlWaves)', min: 2, max: 8, step: 0.1, def: 5.5 },
-    { key: 'taper', label: '테이퍼(taper)', min: 0, max: 1, step: 0.01, def: 0.5 },
-    { key: 'thetaSpan', label: '각도범위(thetaSpan)', min: 1, max: 6, step: 0.1, def: 5 },
-    { key: 'throwGain', label: '던지기(throwGain)', min: 0, max: 3, step: 0.05, def: 1.8 },
-    { key: 'detailGain', label: '디테일(detailGain)', min: 0, max: 2, step: 0.05, def: 1.5 },
-    { key: 'hookScale', label: '훅스케일(hookScale)', min: -0.5, max: 1.5, step: 0.05, def: 0 },
-    { key: 'tongueScale', label: '혀스케일(tongueScale)', min: -0.5, max: 1.5, step: 0.05, def: 0 },
-  ];
-
-  const inputRefs = [];  // {input, valSpan, cfg}
-
-  SLIDER_CFGS.forEach(cfg => {
-    const row = document.createElement('div');
-    row.style.marginBottom = '4px';
-
-    const label = document.createElement('label');
-    label.style.cssText = 'display:flex;align-items:center;gap:4px;';
-
-    const nameSpan = document.createElement('span');
-    nameSpan.style.flex = '1';
-    nameSpan.textContent = cfg.label;
-    label.appendChild(nameSpan);
-
-    const input = document.createElement('input');
-    input.type = 'range';
-    input.min = String(cfg.min);
-    input.max = String(cfg.max);
-    input.step = String(cfg.step);
-    input.value = String(cfg.def);
-    input.style.cssText = 'flex:2;width:80px;';
-    input.dataset.key = cfg.key;
-
-    const valSpan = document.createElement('span');
-    valSpan.style.cssText = 'width:32px;text-align:right;font-size:11px;';
-    valSpan.textContent = cfg.def.toFixed(2);
-
-    input.oninput = () => {
-      valSpan.textContent = parseFloat(input.value).toFixed(2);
-      TEST[cfg.key] = parseFloat(input.value);
-    };
-
-    label.appendChild(input);
-    label.appendChild(valSpan);
-    row.appendChild(label);
-    panel.appendChild(row);
-    inputRefs.push({ input, valSpan, cfg });
-  });
-
-  // ?hero feature removed per user request
-
-  const resetBtn = document.createElement('button');
-  resetBtn.textContent = 'Reset defaults';
-  resetBtn.style.cssText = 'margin-top:8px;padding:3px 10px;cursor:pointer;';
-  resetBtn.onclick = () => {
-    // TEST 초기화
-    SLIDER_CFGS.forEach(cfg => {
-      TEST[cfg.key] = cfg.key === 'hookScale' || cfg.key === 'tongueScale' ? 0 : null;
-    });
-    // 슬라이더 입력값도 기본값으로
-    inputRefs.forEach(ref => {
-      ref.input.value = String(ref.cfg.def);
-      ref.valSpan.textContent = ref.cfg.def.toFixed(2);
-    });
-  };
-  panel.appendChild(resetBtn);
 
   document.body.appendChild(panel);
 }
@@ -760,38 +660,18 @@ function updateBreakerAnchors(summary) {
     const rand = mulberry32(Math.abs(seed >>> 0));
     const varScale = 0.15 + 0.1 * relative; // more variation for dominant breakers
     
-    anchor.targetRadius = Math.min(8.5, (1.6 + 6.0 * relative) * (TEST.active ? 1.0 : (1.0 + (rand() - 0.5) * varScale)));
-    anchor.targetHeightGain = Math.min(1.2, (0.42 + 0.58 * relative) * (TEST.active ? 1.0 : (1.0 + (rand() - 0.5) * varScale)));
-    anchor.curlRate = (0.61 - 0.19 * relative) * (TEST.active ? 1.0 : (1.0 + (rand() - 0.5) * 0.1));
-    anchor.curlWaves = Math.min(8, Math.max(2.5, anchor.extent / 9)) * (TEST.active ? 1.0 : (1.0 + (rand() - 0.5) * 0.08));
-    anchor.targetCrestPeak = (0.55 - 0.25 * relative) * (TEST.active ? 1.0 : (1.0 + (rand() - 0.5) * 0.12));
-    anchor.targetCrestWidth = (0.58 - 0.06 * relative) * (TEST.active ? 1.0 : (1.0 + (rand() - 0.5) * 0.15));
-    anchor.targetThetaSpan = (3.0 + 2.2 * relative) * (TEST.active ? 1.0 : (1.0 + (rand() - 0.5) * 0.1));
-    anchor.taper = 0.4 * (TEST.active ? 1.0 : (1.0 + (rand() - 0.5) * 0.2));
-    anchor.targetThrowGain = (0.55 + 0.55 * relative) * (TEST.active ? 1.0 : (1.0 + (rand() - 0.5) * varScale));
-    anchor.targetDetailGain = Math.min(1.5, (0.7 + 0.6 * relative) * (TEST.active ? 1.0 : (1.0 + (rand() - 0.5) * 0.12)));
+    anchor.targetRadius = Math.min(8.5, (1.6 + 6.0 * relative) * (1.0 + (rand() - 0.5) * varScale));
+    anchor.targetHeightGain = Math.min(1.2, (0.42 + 0.58 * relative) * (1.0 + (rand() - 0.5) * varScale));
+    anchor.curlRate = (0.61 - 0.19 * relative) * (1.0 + (rand() - 0.5) * 0.1);
+    anchor.curlWaves = Math.min(8, Math.max(2.5, anchor.extent / 9)) * (1.0 + (rand() - 0.5) * 0.08);
+    anchor.targetCrestPeak = (0.55 - 0.25 * relative) * (1.0 + (rand() - 0.5) * 0.12);
+    anchor.targetCrestWidth = (0.58 - 0.06 * relative) * (1.0 + (rand() - 0.5) * 0.15);
+    anchor.targetThetaSpan = (3.0 + 2.2 * relative) * (1.0 + (rand() - 0.5) * 0.1);
+    anchor.taper = 0.4 * (1.0 + (rand() - 0.5) * 0.2);
+    anchor.targetThrowGain = (0.55 + 0.55 * relative) * (1.0 + (rand() - 0.5) * varScale);
+    anchor.targetDetailGain = Math.min(1.5, (0.7 + 0.6 * relative) * (1.0 + (rand() - 0.5) * 0.12));
   }
 
-  // Test-mode live overrides: sliders (?test) replace simulation-derived targets so
-  // each art value can be tuned by eye. Null fields keep their default.
-  if (TEST.active) {
-    // Apply overrides to ALL claimed anchors so sliders affect every wave
-    breakerAnchors.forEach(a => {
-      if (!a.component) return;
-      if (TEST.heightGain != null) a.targetHeightGain = TEST.heightGain;
-      if (TEST.radius != null) a.targetRadius = TEST.radius;
-      if (TEST.crestPeak != null) a.targetCrestPeak = TEST.crestPeak;
-      if (TEST.crestWidth != null) a.targetCrestWidth = TEST.crestWidth;
-      if (TEST.curlWaves != null) a.curlWaves = TEST.curlWaves;
-      if (TEST.taper != null) a.taper = TEST.taper;
-      if (TEST.thetaSpan != null) a.targetThetaSpan = TEST.thetaSpan;
-      if (TEST.throwGain != null) a.targetThrowGain = TEST.throwGain;
-      if (TEST.detailGain != null) a.targetDetailGain = TEST.detailGain;
-      // hook/tongue scales feed the shader via debugMode.y/z (see waveProfile)
-      DEV._hookScale = TEST.hookScale;
-      DEV._tongueScale = TEST.tongueScale;
-    });
-  }
 }
 
 function smoothBreakerAnchors(deltaSeconds) {
@@ -1774,8 +1654,8 @@ function draw(now) {
   uniforms.set([camRight[0], camRight[1], camRight[2], tanHalfY * aspect], 36);
   uniforms.set([camUp[0], camUp[1], camUp[2], tanHalfY], 40);
   uniforms.set([forward[0], forward[1], forward[2], 0], 44);
-  // debugMode.x: 0=off, 1=regions tint. y/z: live hook/tongue scale (test sliders).
-  uniforms.set([DEV.debug, TEST.hookScale, TEST.tongueScale, 0], 48);
+  // debugMode.x: 0=off, 1=regions tint.
+  uniforms.set([DEV.debug, 0, 0, 0], 48);
   // Mountain removed: background is only sky + clouds now.
   device.queue.writeBuffer(uniformBuffer, 0, uniforms);
   writeEvolveParams(elapsed * motionSpeed, deltaSeconds);

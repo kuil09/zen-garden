@@ -208,8 +208,7 @@ fn waveProfile(v: f32, curl: f32, params: WaveParams) -> vec2f {
   if (v < WAVE_HOOK_END) {
     let a = (v - WAVE_CREST_END) / (WAVE_HOOK_END - WAVE_CREST_END);
     // Hook juts forward (~25-35% of height) so the lip clearly curls over.
-    // u.debugMode.y scales the hook reach live (test-mode slider; default 0 = unchanged).
-    let hookReach = (0.90 + 0.50 * curlAmt) * (params.heightGain + 0.5) * (1.0 + u.debugMode.y);
+    let hookReach = (0.90 + 0.50 * curlAmt) * (params.heightGain + 0.5);
     let x = hookReach * smoothstep(0.0, 1.0, a);
     let y = crestMaxY + 0.10 * params.heightGain * sin(a * 3.14159);
     return vec2f(x, y);
@@ -221,7 +220,7 @@ fn waveProfile(v: f32, curl: f32, params: WaveParams) -> vec2f {
   // Tongue curls back inward AND drops below the crest maximum, opening the
   // barrel / negative-space the original vertical cap lacked.
   let tipX = hookX * (1.0 - 0.75 * a);
-  let tipY = crestMaxY - (1.60 + 0.60 * curlAmt) * (params.heightGain + 0.4) * smoothstep(0.0, 1.0, a) * (1.0 + u.debugMode.z);
+  let tipY = crestMaxY - (1.60 + 0.60 * curlAmt) * (params.heightGain + 0.4) * smoothstep(0.0, 1.0, a);
   return vec2f(tipX, tipY);
 }
 
