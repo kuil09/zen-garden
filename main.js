@@ -829,11 +829,17 @@ function writeBreakerParams() {
       const ox = data[offset + 0], oz = data[offset + 2];
       const dx = data[offset + 4] - ox, dz = data[offset + 6] - oz;
       const perpX = -dz, perpZ = dx;
-      const perpLen = Math.hypot(perpX, perpZ);
-      const camX = cameraWorldPos[0], camZ = cameraWorldPos[2];
-      const cx = ox + dx * 0.5, cz = oz + dz * 0.5;
-      const toCamProj = ((camX - cx) * perpX + (camZ - cz) * perpZ) / (perpLen || 1);
-      const bowAmt = Math.max(0, toCamProj) * 0.3;
+      const perpLen = Math.hypot(perpX, perpZ) || 1;
+      // The ridge curvature is physics, not framing: the crest of a plunging
+      // breaker arches the way the wave TRAVELS (its own principal axis /
+      // travel direction), never toward the camera. Project the wave's travel
+      // direction onto the ridge normal to get the bow, signed so it can lean
+      // either way depending on how the wave actually throws.
+      const travelX = anchor.dirX || 0.0;
+      const travelZ = anchor.dirZ || 0.0;
+      const travelProj = (travelX * perpX + travelZ * perpZ) / perpLen;
+      // Bow is a fraction of the crest length, gently arched (never dramatic).
+      const bowAmt = travelProj * 0.12 * Math.min(1.0, perpLen / 20.0);
       // p0 = originA, p3 = originB
       data[offset + 20] = ox; data[offset + 21] = 0; data[offset + 22] = oz; data[offset + 23] = 0;
       data[offset + 32] = ox + dx; data[offset + 33] = 0; data[offset + 34] = oz + dz; data[offset + 35] = 0;
