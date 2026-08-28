@@ -892,9 +892,9 @@ function smoothBreakerAnchors(deltaSeconds) {
 }
 
 function writeBreakerParams() {
-  const data = new Float32Array(breakerAnchors.length * 20);
+  const data = new Float32Array(breakerAnchors.length * 40);
   breakerAnchors.forEach((anchor, index) => {
-    const offset = index * 20;
+    const offset = index * 40;
     const halfSpan = anchor.extent * 0.5;
     const envelope = anchor.envelope;
     data[offset + 0] = anchor.centerX - anchor.dirX * halfSpan;
@@ -1368,7 +1368,7 @@ function createBreakerBuffers() {
     size: SUMMARY_FLOATS * 4,
     usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
   });
-  breakerParamsBuffer = createZeroedBuffer(breakerAnchors.length * 20 * 4, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+  breakerParamsBuffer = createZeroedBuffer(breakerAnchors.length * 40 * 4, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
 }
 
 function createGrids() {

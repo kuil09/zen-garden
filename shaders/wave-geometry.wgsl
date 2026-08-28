@@ -33,6 +33,12 @@ struct Breaker {
   shape: vec4f,
   // throwGain, detailGain, active, seed
   extras: vec4f,
+  // CrestCurve: p0, p1, p2, p3 (each xy), shape (vec4f)
+  curve0: vec4f,
+  curve1: vec4f,
+  curve2: vec4f,
+  curve3: vec4f,
+  curve4: vec4f,
 }
 
 struct WaveParams {
@@ -49,6 +55,7 @@ struct WaveParams {
   curlWaves: f32,
   detailGain: f32,
   phaseOffset: f32,
+  curve: CrestCurve,
 }
 
 @group(0) @binding(2) var<storage, read> breakers: array<Breaker>;
@@ -69,6 +76,12 @@ fn waveParams(instance: u32) -> WaveParams {
   params.curlWaves = placed.params.z;
   params.detailGain = placed.extras.y;
   params.phaseOffset = placed.params.w;
+  // Extract CrestCurve from packed fields (curve0..3 = p0..p3.xy, curve4 = shape)
+  params.curve.p0 = placed.curve0.xy;
+  params.curve.p1 = placed.curve1.xy;
+  params.curve.p2 = placed.curve2.xy;
+  params.curve.p3 = placed.curve3.xy;
+  params.curve.shape = placed.curve4;
   return params;
 }
 
