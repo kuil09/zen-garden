@@ -377,10 +377,25 @@ fn surfaceFragment(input: SurfaceOutput) -> @location(0) vec4f {
   color = mix(color, INK_FOAM, foamEdge * 1.0);
   color = mix(color, INK_PAPER, foamMask * 1.2);
 
+  // #9 Woodblock: visualize material ID using classifyMaterial() and flowClass()
+  let material = classifyMaterial(input.foam, input.compression, input.sheetWeight, input.waveHeight);
+  let flow = flowClass(input.sheetCoordinates);
+  // Overlay material bands as subtle tint (debug visualization)
+  if (u.debugMode.x > 0.5) {
+    // Show material ID as color: deep=blue, body=green, foam=white, claw=yellow
+    var matColor: vec3f;
+    if (material < 0.4) { matColor = vec3f(0.2, 0.3, 0.8); }      // DEEP
+    else if (material < 1.2) { matColor = vec3f(0.2, 0.7, 0.3); } // BODY
+    else if (material < 2.2) { matColor = vec3f(1.0, 1.0, 1.0); }    // FOAM
+    else { matColor = vec3f(1.0, 0.9, 0.2); }                    // CLAW
+    color = mix(color, matColor, 0.5);
+  }
+
   let distance = length(u.cameraTime.xyz - input.worldPosition);
   color = mix(color, INK_PALE, smoothstep(70.0, 220.0, distance) * 0.55);
   return vec4f(color, 1.0);
 }
+
 
 struct BackgroundOutput {
   @builtin(position) position: vec4f,
