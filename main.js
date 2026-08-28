@@ -628,15 +628,12 @@ function updateBreakerAnchors(summary) {
     target.active = true;
     target.component = component;
     if (target.envelope < 0.02) {
-      // Fresh spawn: the envelope then grows the wave out of the sea over ~2 s,
-      // so it rears up instead of popping in.
-      // Art direction: the breaker SHEET stands at the composition focus
-      // (camera-front), regardless of where the numerics boiled. Detection
-      // (when a wave breaks, how strongly) stays physical; placement is not —
-      // "Hokusai's breaker sits mid-frame, not anywhere the numerics boil".
-      const spawnJitter = (Math.random() - 0.5) * 10.0;
-      target.centerX = cameraWorldPos[0] + spawnJitter;
-      target.centerZ = cameraWorldPos[2] + 42.0 + spawnJitter * 0.4;
+      // Fresh spawn: snap to the candidate. The envelope then grows the wave
+      // out of the sea over ~2 s, so it rears up instead of popping in.
+      // The sheet stands where the physics actually boils — the simulation
+      // itself is tuned so breaking happens in front of the camera.
+      target.centerX = component.centerX;
+      target.centerZ = component.centerZ;
       target.dirX = component.dirX;
       target.dirZ = component.dirZ;
       target.extent = component.extent;
@@ -653,9 +650,8 @@ function updateBreakerAnchors(summary) {
     const component = anchor.component;
     const relative = Math.min(1, component.strength / dominantStrength);
     anchor.targetEnvelope = 1;
-    // Keep the sheet at the composition focus, not at the raw detection point.
-    anchor.targetCenterX = cameraWorldPos[0] + (anchor.centerX - cameraWorldPos[0]) * 0.2;
-    anchor.targetCenterZ = cameraWorldPos[2] + 42.0 + (anchor.centerZ - cameraWorldPos[2] - 42.0) * 0.2;
+    anchor.targetCenterX = component.centerX;
+    anchor.targetCenterZ = component.centerZ;
     anchor.targetDirX = component.dirX;
     anchor.targetDirZ = component.dirZ;
     anchor.targetExtent = component.extent;
@@ -982,7 +978,9 @@ function createInitialDynamicState() {
     // Main breaker: placed at the Hokusai composition focus so it naturally
     // breaks within the frame. Higher amplitude and tighter width give a
     // plunging crest that the breaker sheets can ride.
-    { direction: normalize2([0.20, -0.98]), center: [-10.5, 14.0], amplitude: 4.20, modulation: 0.10, phase: 1.4 },
+    // Main breaker: spawns just in front of the camera and travels away (+z),
+    // growing until it breaks within the frame (camera is at z≈-32 looking +z).
+    { direction: normalize2([0.20, 0.98]), center: [-10.5, -20.0], amplitude: 4.20, modulation: 0.10, phase: 0.6 },
     { direction: normalize2([-0.55, 0.83]), center: [7, 3], amplitude: 1.80, modulation: 0.12, phase: 2.0 },
     { direction: normalize2([0.90, -0.44]), center: [-18, 27], amplitude: 1.20, modulation: 0.08, phase: -1.1 },
   ];
