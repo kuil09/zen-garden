@@ -1875,6 +1875,7 @@ function draw(now) {
   // ===== Spray particle simulation =====
   writeSprayCrest();
   writeFoamFingers();
+  writeFractureFeatures();
   device.queue.writeBuffer(sprayParamsBuffer, 0, new Float32Array([
     elapsed,
     deltaSeconds,
