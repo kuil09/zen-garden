@@ -128,7 +128,7 @@ const WAVE_INSTANCES = 3;
 const CLAW_COLUMNS = 1024;
 const CLAW_ROWS = 40;
 const DYNAMIC_SUBSTEPS = 4;
-const UNIFORM_FLOATS = 48;
+const UNIFORM_FLOATS = 52;
 const UNIFORM_SIZE = UNIFORM_FLOATS * Float32Array.BYTES_PER_ELEMENT;
 const COMPUTE_PARAMS_SIZE = 32;
 const RESOLVE_PARAMS_SIZE = 16;
@@ -210,6 +210,7 @@ const DEV = {
   phase: null,      // null => drive from elapsed time (non-deterministic)
   camera: 'default', // 'default' | 'print' (front) | 'yaw-20' | 'yaw+20'
   capture: false,    // ?capture=1 deterministic capture mode (#5)
+  debug: 0,         // 0=off, 1=regions tint (see docs/art-direction-params.md)
 };
 
 function parseDevParams() {
@@ -220,6 +221,7 @@ function parseDevParams() {
   if (q.has('phase')) DEV.phase = clamp01(parseFloat(q.get('phase')));
   if (q.has('camera')) DEV.camera = q.get('camera');
   if (q.has('capture')) DEV.capture = q.get('capture') === '1' || q.get('capture') === 'true';
+  if (q.has('debug')) DEV.debug = q.get('debug') === 'regions' ? 1 : (parseInt(q.get('debug'), 10) || 0);
 }
 
 // Returns the art-parameter set for a given normalized phase, or null if the
@@ -614,9 +616,9 @@ function updateBreakerAnchors(summary) {
     const dz = c.centerZ - cameraZ;
     return dx * dx + dz * dz >= MIN_BREAKER_DIST_FROM_CAMERA * MIN_BREAKER_DIST_FROM_CAMERA;
   });
-  if (FORCE_BREAKER) {
+  if (FORCE_BREAKER || DEV.hero) {
     // Synthesize a breaking component directly ahead of the camera so a breaker
-    // is guaranteed visible for profile verification.
+    // is guaranteed visible (forcebreaker: verify profile; hero: deterministic capture).
     filteredComponents.push({
       centerX: cameraWorldPos[0],
       centerZ: cameraWorldPos[2] + 55,
@@ -689,6 +691,23 @@ function updateBreakerAnchors(summary) {
     anchor.taper = 0.4 * (1.0 + (rand() - 0.5) * 0.2);
     anchor.targetThrowGain = (0.55 + 0.55 * relative) * (1.0 + (rand() - 0.5) * varScale);
     anchor.targetDetailGain = Math.min(1.5, (0.7 + 0.6 * relative) * (1.0 + (rand() - 0.5) * 0.12));
+  }
+
+  // #10 deterministic Hero Wave: when ?hero is set, drive the claimed breaker's
+  // art params from the phase curve so the same seed/phase always reproduces
+  // the same silhouette. Phase is explicit (DEV.phase) or loops from elapsed.
+  if (DEV.hero) {
+    const claimed = breakerAnchors.find((a) => a.component);
+    if (claimed) {
+      const art = heroArtParams(heroPhase) || {};
+      claimed.phaseOffset = DEV.seed * 0.137;
+      if (art.height != null) {
+        claimed.targetHeightGain = Math.min(1.2, art.height * 1.25);
+        claimed.targetRadius = 3.5 + art.height * 5.0;
+        claimed.targetCrestPeak = 0.55 - 0.25 * art.height;
+        claimed.targetCrestWidth = 0.58 - 0.06 * art.height;
+      }
+    }
   }
 }
 
@@ -1584,6 +1603,8 @@ function draw(now) {
   uniforms.set([camRight[0], camRight[1], camRight[2], tanHalfY * aspect], 36);
   uniforms.set([camUp[0], camUp[1], camUp[2], tanHalfY], 40);
   uniforms.set([forward[0], forward[1], forward[2], 0], 44);
+  // debugMode.x: 0=off, 1=regions tint (art-direction param map overlay)
+  uniforms.set([DEV.debug, 0, 0, 0], 48);
   // Mountain removed: background is only sky + clouds now.
   device.queue.writeBuffer(uniformBuffer, 0, uniforms);
   writeEvolveParams(elapsed * motionSpeed, deltaSeconds);

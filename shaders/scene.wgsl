@@ -11,6 +11,8 @@ struct Uniforms {
   camRight: vec4f,
   camUp: vec4f,
   camForward: vec4f,
+  // x: debug mode (0=off, 1=regions tint by profile v). See docs/art-direction-params.md
+  debugMode: vec4f,
 }
 
 struct OceanPoint {
@@ -237,6 +239,17 @@ fn clawLean(coordinate: f32) -> f32 {
 
 @fragment
 fn surfaceFragment(input: SurfaceOutput) -> @location(0) vec4f {
+  // --- Debug overlay: label geometry regions by profile v so the contribution
+  // of each element (face/crest/hook/tongue) is isolatable. Off when debugMode.x<=0.
+  if (u.debugMode.x > 0.5) {
+    let v = clamp(input.sheetCoordinates.y, 0.0, 1.0);
+    var dbg: vec3f;
+    if (v < 0.40) { dbg = vec3f(0.20, 0.45, 1.0); }       // face
+    else if (v < 0.52) { dbg = vec3f(1.0, 1.0, 1.0); }     // crest bulb
+    else if (v < 0.74) { dbg = vec3f(1.0, 0.90, 0.20); }   // hook
+    else { dbg = vec3f(1.0, 0.30, 0.20); }                 // tongue
+    return vec4f(dbg, 1.0);
+  }
   let viewDirection = normalize(u.cameraTime.xyz - input.worldPosition);
   var normal = normalize(input.normal);
   let backFacing = dot(normal, viewDirection) < 0.0;
