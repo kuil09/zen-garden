@@ -225,7 +225,7 @@ const TEST = {
 
 function parseDevParams() {
   const q = new URLSearchParams(window.location.search);
-  if (q.has('hero')) DEV.hero = q.get('hero') === '1' || q.get('hero') === 'true';
+  // ?hero: deterministic capture only (no forced breaker)
   if (q.has('preset')) DEV.preset = q.get('preset');
   if (q.has('seed')) DEV.seed = parseInt(q.get('seed'), 10) || 0;
   if (q.has('phase')) DEV.phase = clamp01(parseFloat(q.get('phase')));
@@ -251,6 +251,22 @@ function buildTestPanel() {
   const sub = document.createElement('small');
   sub.textContent = '?test=1 — 슬라이더로 실시간 튜닝';
   panel.appendChild(sub);
+
+  // Legend for ?debug=regions
+  const legend = document.createElement('div');
+  legend.style.cssText = 'margin-top:8px;padding:6px;border:1px solid #555;border-radius:4px;font-size:11px;';
+  legend.innerHTML = '<b>?debug=regions</b> 색 범례:<br>' +
+    '<span style="color:#2d73ff">■</span> face (0.00-0.40)<br>' +
+    '<span style="color:#fff">■</span> crest bulb (0.40-0.52)<br>' +
+    '<span style="color:#ffea14">■</span> hook (0.52-0.74)<br>' +
+    '<span style="color:#ff4d33">■</span> tongue (0.74-1.00)<br>' +
+    '<hr style="border-color:#444;margin:4px 0">' +
+    '<b>material ID</b> (debug+material):<br>' +
+    '<span style="color:#204bd1">■</span> DEEP<br>' +
+    '<span style="color:#37b34d">■</span> BODY<br>' +
+    '<span style="color:#fff">■</span> FOAM<br>' +
+    '<span style="color:#ffe01a">■</span> CLAW';
+  panel.appendChild(legend);
 
   const hr = document.createElement('hr');
   hr.style.borderColor = '#444';
@@ -755,14 +771,12 @@ function updateBreakerAnchors(summary) {
     const dz = c.centerZ - cameraZ;
     return dx * dx + dz * dz >= MIN_BREAKER_DIST_FROM_CAMERA * MIN_BREAKER_DIST_FROM_CAMERA;
   });
-  if (FORCE_BREAKER || DEV.test) {  // ?hero is now handled by shader params, not forced spawn  // ?test=1은 자연스러운 스폰 유지
+  if (FORCE_BREAKER) {  // ?hero/test no longer force breakers  // ?hero/test no longer force breakers  // ?hero and ?test no longer force breakers  // ?test=1: NO forced breaker (natural simulation)
     // Synthesize a breaking component directly ahead of the camera so a breaker
     // is guaranteed visible (forcebreaker: verify profile; hero: deterministic capture).
-    filteredComponents.push({
-      centerX: cameraWorldPos[0],
-      centerZ: cameraWorldPos[2] + 55,
-      dirX: 1, dirZ: 0, extent: 22, strength: 1,
-    });
+    // ?hero/test no longer inject synthetic components
+    // filteredComponents.push({...}); // removed
+
   }
   for (const anchor of breakerAnchors) {
     anchor.claimed = false;
@@ -838,9 +852,6 @@ function updateBreakerAnchors(summary) {
     // Apply overrides to ALL claimed anchors so sliders affect every wave
     breakerAnchors.forEach(a => {
       if (!a.component) return;
-      // In test mode, make the wave appear instantly (envelope = 1)
-      a.envelope = 1;
-      a.targetEnvelope = 1;
       if (TEST.heightGain != null) a.targetHeightGain = TEST.heightGain;
       if (TEST.radius != null) a.targetRadius = TEST.radius;
       if (TEST.crestPeak != null) a.targetCrestPeak = TEST.crestPeak;
