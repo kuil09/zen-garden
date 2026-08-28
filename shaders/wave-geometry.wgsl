@@ -270,9 +270,12 @@ fn waveSample(uv: vec2f, params: WaveParams, time: f32) -> WaveSample {
   let scale = waveCrestScale(uv.x, params) * params.radius;
   let profile = waveProfile(uv.y, curl, params);
 
-  // #7: 3D crest centreline — the ridge bows toward the camera and the flanks
-  // attenuate asymmetrically, so the sheet reads as a mass, not a flat panel.
-  var position = crestCentreline(params.curve, uv.x)
+  // Straight ridge: the crest line and the profile sweep axis share the same
+  // basis (along/axis). Curving the centreline twisted the sheet, because the
+  // profile's forward direction stays on `axis` while the ridge bows away —
+  // that mismatch rotated the whole sheet about the water plane.
+  var position = params.originA
+    + along * (uv.x * span)
     + axis * (profile.x * scale)
     + vec3f(0.0, profile.y * scale, 0.0);
 
