@@ -189,7 +189,7 @@ fn waveProfile(v: f32, curl: f32, params: WaveParams) -> vec2f {
     let rise = pow(a, 0.70);
     // Clearly concave (hollow) face: bow the mid-face inward so the silhouette
     // reads as a scooped wall, not a straight ramp. Amplified for visibility.
-    let lean = -0.30 * sin(a * 3.14159);
+    let lean = -0.50 * sin(a * 3.14159);
     return vec2f(WAVE_TROUGH_X * pow(1.0 - a, 2.2) + lean, mix(WAVE_TROUGH_Y, crestY, rise));
   }
 
@@ -208,7 +208,7 @@ fn waveProfile(v: f32, curl: f32, params: WaveParams) -> vec2f {
   if (v < WAVE_HOOK_END) {
     let a = (v - WAVE_CREST_END) / (WAVE_HOOK_END - WAVE_CREST_END);
     // Hook juts forward (~25-35% of height) so the lip clearly curls over.
-    let hookReach = (0.90 + 0.50 * curlAmt) * (params.heightGain + 0.5);
+    let hookReach = (2.10 + 1.00 * curlAmt) * (params.heightGain + 0.5);
     let x = hookReach * smoothstep(0.0, 1.0, a);
     let y = crestMaxY + 0.10 * params.heightGain * sin(a * 3.14159);
     return vec2f(x, y);
@@ -216,11 +216,11 @@ fn waveProfile(v: f32, curl: f32, params: WaveParams) -> vec2f {
 
   // --- Segment 5: returning tongue (drops below crest max -> barrel) ------
   let a = (v - WAVE_HOOK_END) / (1.0 - WAVE_HOOK_END);
-  let hookX = (0.90 + 0.50 * curlAmt) * (params.heightGain + 0.5);
+  let hookX = (2.10 + 1.00 * curlAmt) * (params.heightGain + 0.5);
   // Tongue curls back inward AND drops below the crest maximum, opening the
   // barrel / negative-space the original vertical cap lacked.
-  let tipX = hookX * (1.0 - 0.75 * a);
-  let tipY = crestMaxY - (1.60 + 0.60 * curlAmt) * (params.heightGain + 0.4) * smoothstep(0.0, 1.0, a);
+  let tipX = hookX * (1.0 - 1.45 * a);
+  let tipY = crestMaxY - (2.80 + 0.95 * curlAmt) * (params.heightGain + 0.4) * smoothstep(0.0, 1.0, a);
   return vec2f(tipX, tipY);
 }
 
