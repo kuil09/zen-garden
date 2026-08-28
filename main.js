@@ -1605,6 +1605,8 @@ function createComputeAndScenePipelines(modules) {
       { binding: 0, resource: { buffer: uniformBuffer } },
       { binding: 1, resource: { buffer } },
       { binding: 2, resource: { buffer: breakerParamsBuffer } },
+      { binding: 5, resource: { buffer: foamFingerBuffer } },
+      { binding: 6, resource: { buffer: fractureBuffer } },
     ],
   }));
 
