@@ -167,49 +167,12 @@ function smoothstep(e0, e1, x) {
   const t = clamp01((x - e0) / (e1 - e0));
   return t * t * (3 - 2 * t);
 }
-// Piecewise-linear interpolation across a list of [phase, value] knots.
-function curveAt(knots, phase) {
-  if (phase <= knots[0][0]) return knots[0][1];
-  const last = knots[knots.length - 1];
-  if (phase >= last[0]) return last[1];
-  for (let i = 0; i < knots.length - 1; i++) {
-    const [p0, v0] = knots[i];
-    const [p1, v1] = knots[i + 1];
-    if (phase >= p0 && phase <= p1) {
-      return lerp(v0, v1, smoothstep(p0, p1, phase));
-    }
-  }
-  return last[1];
-}
 
-// Art-directed phase curve sets. Each phase segment (gather/rise/hook/suspend/
-// tear/settle) is a list of [phase, value] knots driving the breaker art params.
-const HERO_PRESETS = {
-  kanagawa: {
-    cycleSeconds: 18,
-    anchor: { mode: 'camera-relative', x: -0.18, y: -0.08, depth: 42 },
-    height:        [[0.00, 0.20], [0.16, 0.40], [0.36, 0.85], [0.58, 0.95], [0.72, 0.90], [0.86, 0.50], [1.00, 0.20]],
-    faceConcavity: [[0.00, 0.05], [0.36, 0.35], [0.58, 0.30], [0.86, 0.15], [1.00, 0.05]],
-    crestMass:     [[0.00, 0.10], [0.36, 0.45], [0.58, 0.75], [0.72, 0.70], [1.00, 0.10]],
-    hookReach:     [[0.00, 0.00], [0.36, 0.30], [0.58, 0.65], [0.72, 0.60], [1.00, 0.00]],
-    tongueDrop:    [[0.00, 0.00], [0.36, 0.12], [0.58, 0.40], [0.72, 0.35], [1.00, 0.00]],
-    ridgeBow:      [[0.00, 0.00], [0.36, 0.25], [0.58, 0.50], [0.86, 0.15], [1.00, 0.00]],
-    foamVisibility:[[0.00, 0.00], [0.36, 0.30], [0.58, 0.85], [0.72, 1.00], [0.86, 0.40], [1.00, 0.00]],
-    secondaryRidge:[[0.00, 0.00], [0.36, 0.20], [0.58, 0.55], [0.72, 0.45], [1.00, 0.00]],
-    surfaceFlow:   [[0.00, 0.05], [0.36, 0.50], [0.58, 0.80], [0.86, 0.35], [1.00, 0.05]],
-  },
-};
 
 // Global development/hero configuration parsed from the URL. Defaults are set so
 // the existing simulation-driven composition still runs unchanged when no flags
 // are present.
 const DEV = {
-  hero: false,
-  preset: 'kanagawa',
-  seed: 7,
-  phase: null,      // null => drive from elapsed time (non-deterministic)
-  camera: 'default', // 'default' | 'print' (front) | 'yaw-20' | 'yaw+20'
-  capture: false,    // ?capture=1 deterministic capture mode (#5)
   debug: 0,         // 0=off, 1=regions tint (see docs/art-direction-params.md)
   test: false,      // ?test=1 => live slider panel for empirical tuning
 };
@@ -225,16 +188,11 @@ const TEST = {
 
 function parseDevParams() {
   const q = new URLSearchParams(window.location.search);
-  // ?hero: deterministic capture only (no forced breaker)
-  if (q.has('preset')) DEV.preset = q.get('preset');
-  if (q.has('seed')) DEV.seed = parseInt(q.get('seed'), 10) || 0;
-  if (q.has('phase')) DEV.phase = clamp01(parseFloat(q.get('phase')));
-  if (q.has('camera')) DEV.camera = q.get('camera');
-  if (q.has('capture')) DEV.capture = q.get('capture') === '1' || q.get('capture') === 'true';
   if (q.has('debug')) DEV.debug = q.get('debug') === 'regions' ? 1 : (parseInt(q.get('debug'), 10) || 0);
-  // ?test: slider panel only (no forced breaker)
+  // ?test=1: slider panel + parameter overrides on natural breakers
+  // (no forced breaker — the simulation spawns/crashes waves naturally)
   if (q.has('test')) DEV.test = q.get('test') === '1' || q.get('test') === 'true';
-  TEST.active = false;  // forced breaker disabled per user request
+  TEST.active = DEV.test;
 }
 
 // Build a live slider panel for empirical art-direction tuning. Injected when
@@ -364,29 +322,7 @@ function buildTestPanel() {
 }
 
 
-// Returns the art-parameter set for a given normalized phase, or null if the
-// preset is unknown. Consumed by the breaker placement code so the hero macro
-// silhouette is driven by phase curves rather than live simulation detection.
-  const preset = HERO_PRESETS[DEV.preset];
-  if (!preset) return null;
-  const p = clamp01(phase);
-  return {
-    height:        curveAt(preset.height, p),
-    faceConcavity: curveAt(preset.faceConcavity, p),
-    crestMass:     curveAt(preset.crestMass, p),
-    hookReach:     curveAt(preset.hookReach, p),
-    tongueDrop:    curveAt(preset.tongueDrop, p),
-    ridgeBow:      curveAt(preset.ridgeBow, p),
-    foamVisibility:curveAt(preset.foamVisibility, p),
-    secondaryRidge:curveAt(preset.secondaryRidge, p),
-    surfaceFlow:   curveAt(preset.surfaceFlow, p),
-  };
-}
-
 let device;
-// #10: current normalized hero phase (0..1). Driven by DEV.phase when set for
-// deterministic capture, otherwise loops from elapsed time.
-// heroPhase removed (hero feature disabled)
 let context;
 let format;
 
@@ -759,12 +695,14 @@ function updateBreakerAnchors(summary) {
     const dz = c.centerZ - cameraZ;
     return dx * dx + dz * dz >= MIN_BREAKER_DIST_FROM_CAMERA * MIN_BREAKER_DIST_FROM_CAMERA;
   });
-  if (FORCE_BREAKER) {  // ?hero/test no longer force breakers  // ?hero/test no longer force breakers  // ?hero and ?test no longer force breakers  // ?test=1: NO forced breaker (natural simulation)
+  if (FORCE_BREAKER) {
     // Synthesize a breaking component directly ahead of the camera so a breaker
-    // is guaranteed visible (forcebreaker: verify profile; hero: deterministic capture).
-    // ?hero/test no longer inject synthetic components
-    // filteredComponents.push({...}); // removed
-
+    // is guaranteed visible for profile verification.
+    filteredComponents.push({
+      centerX: cameraWorldPos[0],
+      centerZ: cameraWorldPos[2] + 55,
+      dirX: 1, dirZ: 0, extent: 22, strength: 1,
+    });
   }
   for (const anchor of breakerAnchors) {
     anchor.claimed = false;
@@ -1382,8 +1320,7 @@ async function initialize() {
 
   resize();
   experience.classList.add('is-ready');
-  // #10: parse deterministic hero/capture URL flags before the render loop so
-  // the composition is reproducible from the first frame.
+  // Parse URL flags before the render loop.
   parseDevParams();
   // Reset timers right before starting render loop so first frame has elapsed ≈ 0
   startTime = performance.now();
@@ -1778,12 +1715,6 @@ function draw(now) {
   }
 
   const elapsed = (moving ? now - startTime : pausedElapsed) / 1000;
-  // #10: resolve the hero phase. Explicit ?phase= pins it for reproducible
-  // captures; otherwise it advances with the cycle so the composition lives.
-  const presetCycle = (HERO_PRESETS[DEV.preset] || {}).cycleSeconds || 18;
-  heroPhase = DEV.phase != null
-    ? DEV.phase
-    : (elapsed / presetCycle) % 1;
   const motionSpeed = prefersReducedMotion ? 0.16 : 1;
   const deltaSeconds = moving ? deltaMilliseconds / 1000 : 0;
   const dynamicDelta = Math.min(deltaSeconds, 0.034) * motionSpeed;
