@@ -304,8 +304,10 @@ fn surfaceFragment(input: SurfaceOutput) -> @location(0) vec4f {
   }
 
   // Material classification drives the plate, not just profile coordinate.
-  let material = classifyMaterial(input.foam, input.compression, input.sheetWeight, input.waveHeight);
-  let flow = flowClass(input.sheetCoordinates);
+  // material and flow are already declared above (line ~307-308)
+  // Update material based on current input (reassignment not allowed in WGSL, so we use different names)
+  let mat = classifyMaterial(input.foam, input.compression, input.sheetWeight, input.waveHeight);
+  let flw = flowClass(input.sheetCoordinates);
 
   // The plate a surface belongs to is decided by where it sits on the wave, not
   // by a light source. On the breaker the profile coordinate does that directly:
@@ -386,8 +388,7 @@ fn surfaceFragment(input: SurfaceOutput) -> @location(0) vec4f {
   color = mix(color, INK_PAPER, foamMask * 1.2);
 
   // #9 Woodblock: visualize material ID using classifyMaterial() and flowClass()
-  let material = classifyMaterial(input.foam, input.compression, input.sheetWeight, input.waveHeight);
-  let flow = flowClass(input.sheetCoordinates);
+  // (material and flow are already declared above, line ~307-308)
   // Overlay material bands as subtle tint (debug visualization)
   if (u.debugMode.x > 0.5) {
     // Show material ID as color: deep=blue, body=green, foam=white, claw=yellow
