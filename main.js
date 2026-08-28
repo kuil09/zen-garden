@@ -1597,6 +1597,8 @@ function createComputeAndScenePipelines(modules) {
       { binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } },
       { binding: 1, visibility: GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } },
       { binding: 2, visibility: GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } },
+      { binding: 5, visibility: GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } },
+      { binding: 6, visibility: GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } },
     ],
   });
   waveBindGroups = oceanBuffers.map((buffer) => device.createBindGroup({
@@ -1654,7 +1656,7 @@ function createComputeAndScenePipelines(modules) {
   foamPipeline = device.createRenderPipeline({
     layout: 'auto',
     vertex: { module: sceneModule, entryPoint: 'foamVertex', buffers: [] },
-    fragment: { module: sceneModule, entryPoint: 'surfaceFragment', targets: [{ format, blend: { color: { srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha' } } }] },
+    fragment: { module: sceneModule, entryPoint: 'surfaceFragment', targets: [{ format, blend: { color: { srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha' }, alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' } } }] },
     primitive: { topology: 'triangle-strip', cullMode: 'none' },
     depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less' },
   });
