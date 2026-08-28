@@ -917,6 +917,26 @@ function writeBreakerParams() {
     data[offset + 17] = anchor.detailGain;
     data[offset + 18] = envelope > 0.01 ? 1 : 0;
     data[offset + 19] = 0;
+    // CrestCurve: pack cubic Bezier control points so waveSample can bow the crest
+    // toward the camera. p0..p3 define the 3D centreline; shape.y = forwardBow.
+    if (anchor.component) {
+      const ox = data[offset + 0], oz = data[offset + 2];
+      const dx = data[offset + 4] - ox, dz = data[offset + 6] - oz;
+      const perpX = -dz, perpZ = dx;
+      const perpLen = Math.hypot(perpX, perpZ);
+      const camX = cameraWorldPos[0], camZ = cameraWorldPos[2];
+      const cx = ox + dx * 0.5, cz = oz + dz * 0.5;
+      const toCamProj = ((camX - cx) * perpX + (camZ - cz) * perpZ) / (perpLen || 1);
+      const bowAmt = Math.max(0, toCamProj) * 0.3;
+      // p0 = originA, p3 = originB
+      data[offset + 20] = ox; data[offset + 21] = 0; data[offset + 22] = oz; data[offset + 23] = 0;
+      data[offset + 32] = ox + dx; data[offset + 33] = 0; data[offset + 34] = oz + dz; data[offset + 35] = 0;
+      // p1, p2 bow toward camera
+      data[offset + 24] = ox + dx * 0.33 + perpX * bowAmt; data[offset + 25] = 0; data[offset + 26] = oz + dz * 0.33 + perpZ * bowAmt; data[offset + 27] = 0;
+      data[offset + 28] = ox + dx * 0.66 + perpX * bowAmt; data[offset + 29] = 0; data[offset + 30] = oz + dz * 0.66 + perpZ * bowAmt; data[offset + 31] = 0;
+      // shape: peakU=0.5, forwardBow=bowAmt, bank=0, seed=phaseOffset
+      data[offset + 36] = 0.5; data[offset + 37] = bowAmt; data[offset + 38] = 0; data[offset + 39] = anchor.phaseOffset || 0;
+    }
   });
   device.queue.writeBuffer(breakerParamsBuffer, 0, data);
 }

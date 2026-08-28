@@ -264,15 +264,15 @@ struct WaveSample {
 
 fn waveSample(uv: vec2f, params: WaveParams, time: f32) -> WaveSample {
   let along = normalize(params.originB - params.originA);
-  let span = length(params.originB - params.originA);
   let axis = vec3f(along.z, 0.0, -along.x);
 
   let curl = waveCurl(uv.x, params, time);
   let scale = waveCrestScale(uv.x, params) * params.radius;
   let profile = waveProfile(uv.y, curl, params);
 
-  var position = params.originA
-    + along * (uv.x * span)
+  // #7: use 3D crest centreline (CrestCurve) instead of straight line.
+  let crestPos = crestCentreline(params.curve, uv.x);
+  var position = crestPos
     + axis * (profile.x * scale)
     + vec3f(0.0, profile.y * scale, 0.0);
 
