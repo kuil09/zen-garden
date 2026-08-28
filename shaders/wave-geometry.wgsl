@@ -303,13 +303,12 @@ fn waveSample(uv: vec2f, params: WaveParams, time: f32) -> WaveSample {
 
   // Wave thickness proportional to radius
   let thickness = 0.6 * params.radius;
-  let thicknessOffset = (uv.y - 0.5) * 2.0 * 0.5;  // -0.5 to +0.5 * thickness
 
   var position = params.originA
     + along * (uv.x * span)
     + axis * (profile.x * scale)
     + vec3f(0.0, profile.y * scale, 0.0);
-  position += normal * (thicknessOffset * 0.5);  // Extrude along normal for thickness
+  position += normal * ((uv.y - 0.5) * thickness);  // Extrude along normal for thickness
 
   let field = sampleOceanWorld(position.xz);
   let detail = field.displacementFoam.y * 0.30 * params.detailGain
