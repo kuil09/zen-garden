@@ -403,6 +403,7 @@ let breakerSummaryBuffer;
 let breakerStagingBuffer;
 let breakerParamsBuffer;
 let foamFingerBuffer;
+let fractureBuffer;
 let breakerBindGroups;
 
 // ---- Pipelines: compute ----
@@ -896,6 +897,24 @@ function smoothBreakerAnchors(deltaSeconds) {
 
 // #8 FoamFinger — generate 2-3 fingers per active breaker and pack into buffer.
 const MAX_FINGERS = 16;
+// #12 FractureFeature — pack meso-scale fracture features.
+const MAX_FRACTURES = 4;
+function writeFractureFeatures() {
+  const data = new Float32Array(MAX_FRACTURES * 16);
+  let count = 0;
+  breakerAnchors.forEach((anchor) => {
+    if (anchor.envelope < 0.01 || count >= MAX_FRACTURES) return;
+    // One fracture feature at the hook/tongue transition
+    const off = count * 16;
+    data[off+0] = 0.72; data[off+1] = 0.78; data[off+2] = 0.08; data[off+3] = 0.12; // region
+    data[off+4] = 0.5; data[off+5] = 0.0; data[off+6] = 0.0; data[off+7] = 0.3; // shape
+    data[off+8] = 0.36; data[off+9] = 0.58; data[off+10] = 1.0; data[off+11] = 0.0; // life
+    count++;
+  });
+  device.queue.writeBuffer(fractureBuffer, 0, data);
+  return count;
+}
+
 function writeFoamFingers() {
   const data = new Float32Array(MAX_FINGERS * 16);
   let count = 0;
@@ -1421,7 +1440,8 @@ function createBreakerBuffers() {
     usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
   });
   breakerParamsBuffer = createZeroedBuffer(breakerAnchors.length * 40 * 4, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
-  foamFingerBuffer = createZeroedBuffer(16 * 16 * 4, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST); // 16 fingers max, 16 floats each
+  foamFingerBuffer = createZeroedBuffer(16 * 16 * 4, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+  fractureBuffer = createZeroedBuffer(4 * 16 * 4, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST); // 4 features max // 16 fingers max, 16 floats each
 }
 
 function createGrids() {

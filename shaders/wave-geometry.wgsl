@@ -508,6 +508,7 @@ fn foamFingerWidth(finger: FoamFinger, t: f32) -> f32 {
 // Reads from foamFingers storage buffer and uses foamFingerPoint() to
 // generate the ribbon centreline.
 @group(0) @binding(5) var<storage, read> foamFingers: array<FoamFinger>;
+@group(0) @binding(6) var<storage, read> fractureFeatures: array<FractureFeature>;
 
 @vertex
 fn foamVertex(@location(0) uv: vec2f, @builtin(instance_index) instance: u32) -> SurfaceOutput {
