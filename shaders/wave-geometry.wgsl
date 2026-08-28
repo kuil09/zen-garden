@@ -270,8 +270,9 @@ fn waveSample(uv: vec2f, params: WaveParams, time: f32) -> WaveSample {
   let scale = waveCrestScale(uv.x, params) * params.radius;
   let profile = waveProfile(uv.y, curl, params);
 
-  var position = params.originA
-    + along * (uv.x * span)
+  // #7: 3D crest centreline — the ridge bows toward the camera and the flanks
+  // attenuate asymmetrically, so the sheet reads as a mass, not a flat panel.
+  var position = crestCentreline(params.curve, uv.x)
     + axis * (profile.x * scale)
     + vec3f(0.0, profile.y * scale, 0.0);
 
