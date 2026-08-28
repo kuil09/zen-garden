@@ -11,8 +11,6 @@ struct Uniforms {
   camRight: vec4f,
   camUp: vec4f,
   camForward: vec4f,
-  // x: debug mode (0=off, 1=regions tint by profile v). See docs/art-direction-params.md
-  debugMode: vec4f,
 }
 
 struct OceanPoint {
@@ -90,46 +88,6 @@ struct SurfaceOutput {
   @location(7) sheetWeight: f32,
 }
 
-// ============================================================================
-// #9 — Woodblock surface language (additive foundation).
-//
-// Today the print look comes from an FBM-perturbed colour ramp (scene.wgsl)
-// plus a global Sobel edge (post.wgsl). The goal is to separate the surface into
-// explicit layers — flat colour plates, object-space flow ribbons, and
-// silhouette/occlusion/material-boundary keylines — and stop leaning on a
-// screen-space Sobel that also detects clouds and paper noise.
-//
-// This foundation adds a material/plate classifier. The actual extra render
-// target (a material-ID / plate-ID attachment) and the keyline rasterizer are
-// Phase 3 follow-ups; the classifier below is what feeds them. It deliberately
-// returns a discrete ID from geometry-derived signals, NOT from FBM, so the
-// lines/plates survive with FBM disabled (a hard #9 completion condition).
-// ============================================================================
-const MAT_SKY: f32 = 0.0;
-const MAT_DEEP: f32 = 1.0;      // trough / deep ink plate
-const MAT_BODY: f32 = 2.0;      // main wave body plate
-const MAT_FOAM: f32 = 3.0;      // aerated white plate
-const MAT_CLAW: f32 = 4.0;      // foam finger / claw plate
-
-// Discrete material id from geometry-derived signals only.
-fn classifyMaterial(foam: f32, compression: f32, sheetWeight: f32, waveHeight: f32) -> f32 {
-  if (sheetWeight >= 1.5) { return MAT_CLAW; }
-  if (foam > 0.62) { return MAT_FOAM; }
-  if (waveHeight < -0.18 && compression < 0.25) { return MAT_DEEP; }
-  return MAT_BODY;
-}
-
-// Flow-class hint (face / shoulder / hook / tongue) derived from the profile
-// coordinate, used later to orient flow ribbons/lines along T_art.
-fn flowClass(sheetCoordinates: vec2f) -> f32 {
-  // v along the cross-section: 0 skirt, mid face, high crest/tongue.
-  let v = clamp(sheetCoordinates.y, 0.0, 1.0);
-  if (v < 0.30) { return 0.0; }   // face
-  if (v < 0.55) { return 1.0; }   // shoulder
-  if (v < 0.78) { return 2.0; }   // hook
-  return 3.0;                     // tongue
-}
-
 @vertex
 fn oceanVertex(@location(0) uv: vec2f) -> SurfaceOutput {
   // The grid follows the camera and fans out toward the horizon. Sampling the
@@ -199,63 +157,8 @@ fn hash11(value: f32) -> f32 {
   return fract(sin(value * 78.233) * 43758.5453);
 }
 
-// Hokusai's foam is not a texture, it is drawn: a rank of tapering fingers that
-// each split into smaller fingers, reaching down off the lip. Four generations of
-// wedges, each half the width and half the reach of the one it grows from.
-// Returns (how far the finger reaches, how far across that finger this sample sits).
-fn clawField(sheet: vec2f, reach: f32, seed: f32, generations: i32, baseFrequency: f32) -> vec2f {
-  var extent = 0.0;
-  var lateral = 0.0;
-  var frequency = baseFrequency;
-  var amplitude = reach;
-  for (var generation = 0; generation < generations; generation = generation + 1) {
-    let scaled = sheet.x * frequency;
-    let cell = floor(scaled);
-    let local = fract(scaled) - 0.5;
-    let jitter = (hash11(cell + seed + f32(generation) * 31.7) - 0.5) * 0.46;
-    let width = 0.36 + 0.13 * hash11(cell * 1.7 + seed + 5.1);
-    let reachScale = 0.40 + 0.60 * hash11(cell * 2.9 + seed + 11.7);
-    let offset = abs(local - jitter) / width;
-    // A flattened dome: the finger holds its width most of the way up and closes
-    // in a round tip. A parabola would give a spike, which is not a claw.
-    var finger = 0.0;
-    if (offset < 1.0) {
-      finger = amplitude * reachScale * pow(sqrt(1.0 - offset * offset), 0.80);
-    }
-    if (finger > extent) {
-      extent = finger;
-      lateral = offset;
-    }
-    frequency *= 1.85;
-    amplitude *= 0.58;
-  }
-  return vec2f(extent, lateral);
-}
-
-// How far a finger leans as it rises, which is what turns a spike into a claw.
-fn clawLean(coordinate: f32) -> f32 {
-  return 0.30 + 0.45 * hash11(floor(coordinate * 4.0) + 8.3);
-}
-
 @fragment
 fn surfaceFragment(input: SurfaceOutput) -> @location(0) vec4f {
-  // --- Debug overlay: label geometry regions by profile v so the contribution
-  // of each element (face/crest/hook/tongue) is isolatable. Off when debugMode.x<=0.
-  // In debug mode the claw strip is discarded entirely: it roots at the crest
-  // (v≈0.55) and rises over the hook/tongue, hiding them from view.
-  if (u.debugMode.x > 0.5 && input.sheetWeight > 1.5) {
-    discard;
-  }
-  // Only the wave sheet itself carries the profile v, so only it gets colored.
-  if (u.debugMode.x > 0.5 && input.sheetWeight > 0.5 && input.sheetWeight < 1.5) {
-    let v = clamp(input.sheetCoordinates.y, 0.0, 1.0);
-    var dbg: vec3f;
-    if (v < 0.40) { dbg = vec3f(0.20, 0.45, 1.0); }       // face
-    else if (v < 0.52) { dbg = vec3f(1.0, 1.0, 1.0); }     // crest bulb
-    else if (v < 0.74) { dbg = vec3f(1.0, 0.90, 0.20); }   // hook
-    else { dbg = vec3f(1.0, 0.30, 0.20); }                 // tongue
-    return vec4f(dbg, 1.0);
-  }
   let viewDirection = normalize(u.cameraTime.xyz - input.worldPosition);
   var normal = normalize(input.normal);
   let backFacing = dot(normal, viewDirection) < 0.0;
@@ -266,87 +169,18 @@ fn surfaceFragment(input: SurfaceOutput) -> @location(0) vec4f {
 
   let lightDirection = normalize(u.sunDirection.xyz);
   let nol = dot(normal, lightDirection);
-  let nov = max(0.001, dot(normal, viewDirection));
-  let onSheet = input.sheetWeight > 0.5;
-  let onClaw = input.sheetWeight > 1.5;
-
-  // #9 Woodblock: material classification and flow class
-  let material = classifyMaterial(input.foam, input.compression, input.sheetWeight, input.waveHeight);
-  let flow = flowClass(input.sheetCoordinates);
-
-  // Cut the fingers out of the claw strip. Everything past the finger's length is
-  // not water at all, so it never reaches the plate.
-  if (onClaw) {
-    let height = input.sheetCoordinates.y;
-    let lean = clawLean(input.sheetCoordinates.x);
-    let shifted = input.sheetCoordinates.x + height * lean * 0.15;
-    let claw = clawField(vec2f(shifted, 0.0), 1.0, 3.7, 5, 9.0);
-    if (height > claw.x) {
-      // Above the fingers the sheet is not water any more, but the print still
-      // puts discrete drops up there. Carve them out of the same strip.
-      let dropCell = vec2f(floor(shifted * 74.0), floor(height * 26.0));
-      let jitter = vec2f(hash11(dropCell.x * 3.1 + dropCell.y * 7.7),
-                         hash11(dropCell.x * 5.3 + dropCell.y * 2.9));
-      let centre = (dropCell + jitter) / vec2f(74.0, 26.0);
-      let toDrop = (vec2f(shifted, height) - centre) * vec2f(74.0, 26.0);
-      let radius = 0.16 + 0.20 * hash11(dropCell.x * 1.9 + dropCell.y * 11.3);
-      let alive = hash11(dropCell.x * 8.1 + dropCell.y * 4.3)
-        < 0.30 * (1.0 - smoothstep(0.0, 0.55, height - claw.x));
-      if (!alive || length(toDrop) > radius) {
-        discard;
-      }
-      let rim = smoothstep(radius * 0.62, radius, length(toDrop));
-      return vec4f(mix(INK_PAPER, INK_MID, rim * 0.80), 1.0);
-    }
-    let tip = saturate(height / max(claw.x, 0.001));
-    // A finger of foam against a paper sky is invisible unless it is drawn. Give
-    // it the carved outline and the pale underside that the print uses.
-    // Hokusai: pure white claws with razor-sharp carved outlines.
-    var clawColor = INK_FOAM;
-    clawColor = mix(INK_FOAM, clawColor, smoothstep(0.01, 0.35, tip));
-    clawColor = mix(clawColor, INK_PAPER, smoothstep(0.30, 0.80, tip) * 0.7);
-    clawColor = mix(clawColor, INK_FOAM, smoothstep(0.55, 0.95, claw.y) * 0.95);
-    let outline = max(smoothstep(0.95, 1.0, claw.y), smoothstep(0.97, 1.0, tip));
-    clawColor = mix(clawColor, INK_MID, outline * 0.35);
-    // Extra bright tip highlight
-    clawColor = mix(clawColor, vec3f(1.0), smoothstep(0.92, 1.0, tip) * 0.15);
-    return vec4f(clawColor, 1.0);
-  }
-
-  // Material classification drives the plate, not just profile coordinate.
-  // material and flow are already declared above (line ~307-308)
-  // The plate a surface belongs to is decided by where it sits on the wave, not
-  // by a light source. On the breaker the profile coordinate does that directly:
-  // deep ink at the trough, pale plate up at the lip.
   let sun = saturate(nol * 0.5 + 0.5);
   let sky = saturate(normal.y * 0.5 + 0.5);
-  var level: f32;
-  if (onSheet) {
-    // Base level from profile, adjusted by material
-    level = mix(0.08, 0.92, pow(saturate(input.sheetCoordinates.y), 0.72));
-    if (material < 0.4) { level = mix(level, 0.05, 0.7); }      // DEEP → darker
-    else if (material < 1.2) { level = mix(level, 0.45, 0.3); } // BODY → slightly lighter
-    else if (material < 2.2) { level = 1.0; }                // FOAM → paper white
-    else { level = mix(level, 0.92, 0.5); }                    // CLAW → lighter
-    level = level * 0.80 + sun * 0.10 + sky * 0.10;
-    // Flow lines: nudge level along flow direction
-    let flowNoise = fbm(input.sheetCoordinates * vec2f(2.6, 5.4) + vec2f(0.0, 3.1));
-    level += (flowNoise - 0.5) * 0.26 * (1.0 - abs(flow - 1.5) * 0.5);
-  } else {
-    // The spectral field only moves the sea by a metre or so, so map that range
-    // across the whole ramp; otherwise every distant plate prints the same tone.
-    level = 0.02
-      + smoothstep(-1.10, 1.45, input.waveHeight) * 0.50
-      + sun * 0.09
-      + sky * 0.07;
-    // Stretched along the swell so the open sea reads as ranks of water rather
-    // than as mottling.
-    level += (fbm(input.fieldCoordinates * vec2f(0.10, 0.62)) - 0.5) * 0.26;
-  }
-  // The inside of the barrel is a darker plate than its outer face.
-  if (backFacing) {
-    level *= 0.52;
-  }
+
+  // The spectral field only moves the sea by a metre or so, so map that range
+  // across the whole ramp; otherwise every distant plate prints the same tone.
+  var level = 0.02
+    + smoothstep(-1.10, 1.45, input.waveHeight) * 0.50
+    + sun * 0.09
+    + sky * 0.07;
+  // Stretched along the swell so the open sea reads as ranks of water rather
+  // than as mottling.
+  level += (fbm(input.fieldCoordinates * vec2f(0.10, 0.62)) - 0.5) * 0.26;
   level = saturate(level);
   var color = waterRamp(level);
 
@@ -355,56 +189,24 @@ fn surfaceFragment(input: SurfaceOutput) -> @location(0) vec4f {
   color = mix(color, vec3f(0.353, 0.612, 0.596), crest * 0.38);
 
   // Foam is unprinted paper: a hard edge, never a gradient.
-  // Hokusai-style aggressive foam: sharp carved edges, bright white.
-  var foamMask = 0.0;
-  var foamEdge = 0.0;
-  if (onSheet) {
-    let sheet = input.sheetCoordinates;
-    // Inside the barrel the aerated water lies in bands that follow the crest,
-    // so the boundary wanders along u rather than breaking into vertical spikes.
-    let reach = (0.04 + 0.25 * input.foam) * smoothstep(0.10, 0.80, input.foam);
-    let band = fbm(vec2f(sheet.x * 4.0, 2.0)) - 0.5;
-    let claws = clawField(sheet, reach * 1.1, 5.0, 5, 4.0).x;
-    let boundary = WAVE_LIP_V - reach - band * 0.30 - claws;
-    foamMask = step(boundary, sheet.y);
-    foamEdge = step(boundary - 0.09, sheet.y);
-    // The tongue is solid white water once the wave is well into its break.
-    foamMask = max(foamMask, step(0.88, sheet.y));
-  } else {
-    let breakup = fbm(input.fieldCoordinates * 1.5);
-    let fine = fbm(input.fieldCoordinates * 6.5 + vec2f(11.3, -4.1));
-    let porosity = breakup * 0.65 + fine * 0.35;
-    foamMask = step(0.4, input.foam * 2.3 - porosity * 0.75 + 0.12);
-    foamEdge = step(0.4, input.foam * 2.3 - porosity * 0.75 - 0.01);
-    // Suppress foam too close to camera (boundary waves entering view edge)
-    // Extended: start fading at 15, fully faded by 35 (was 8-22)
-    let distToCam = length(u.cameraTime.xyz - input.worldPosition);
-    let nearFade = smoothstep(15.0, 35.0, distToCam);
-    foamMask *= nearFade;
-    foamEdge *= nearFade;
-    // Suppress foam on far left of view (camera-relative X)
-    // Extended: start fading at -35, fully faded by -25 (was -28 to -18)
-    let toWorld = input.worldPosition - u.cameraTime.xyz;
-    let viewX = dot(toWorld, u.camRight.xyz);
-    let leftFade = smoothstep(-35.0, -25.0, viewX); // fade out left of view center
-    foamMask *= leftFade;
-    foamEdge *= leftFade;
-  }
+  let breakup = fbm(input.fieldCoordinates * 1.5);
+  let fine = fbm(input.fieldCoordinates * 6.5 + vec2f(11.3, -4.1));
+  let porosity = breakup * 0.65 + fine * 0.35;
+  var foamMask = step(0.4, input.foam * 2.3 - porosity * 0.75 + 0.12);
+  var foamEdge = step(0.4, input.foam * 2.3 - porosity * 0.75 - 0.01);
+  // Suppress foam too close to camera (boundary waves entering view edge).
+  let distToCam = length(u.cameraTime.xyz - input.worldPosition);
+  let nearFade = smoothstep(15.0, 35.0, distToCam);
+  foamMask *= nearFade;
+  foamEdge *= nearFade;
+  // Suppress foam on far left of view (camera-relative X).
+  let toWorld = input.worldPosition - u.cameraTime.xyz;
+  let viewX = dot(toWorld, u.camRight.xyz);
+  let leftFade = smoothstep(-35.0, -25.0, viewX);
+  foamMask *= leftFade;
+  foamEdge *= leftFade;
   color = mix(color, INK_FOAM, foamEdge * 1.0);
   color = mix(color, INK_PAPER, foamMask * 1.2);
-
-  // #9 Woodblock: visualize material ID using classifyMaterial() and flowClass()
-  // (material and flow are already declared above, line ~307-308)
-  // Overlay material bands as subtle tint (debug visualization)
-  if (u.debugMode.x > 0.5) {
-    // Show material ID as color: deep=blue, body=green, foam=white, claw=yellow
-    var matColor: vec3f;
-    if (material < 0.4) { matColor = vec3f(0.2, 0.3, 0.8); }      // DEEP
-    else if (material < 1.2) { matColor = vec3f(0.2, 0.7, 0.3); } // BODY
-    else if (material < 2.2) { matColor = vec3f(1.0, 1.0, 1.0); }    // FOAM
-    else { matColor = vec3f(1.0, 0.9, 0.2); }                    // CLAW
-    color = mix(color, matColor, 0.5);
-  }
 
   let distance = length(u.cameraTime.xyz - input.worldPosition);
   color = mix(color, INK_PALE, smoothstep(70.0, 220.0, distance) * 0.55);

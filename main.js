@@ -1,114 +1,9 @@
 import spectralShader from './shaders/spectral.wgsl?raw';
 import dynamicShader from './shaders/dynamic.wgsl?raw';
 import resolveShader from './shaders/resolve.wgsl?raw';
-import breakersShader from './shaders/breakers.wgsl?raw';
 import sceneShader from './shaders/scene.wgsl?raw';
-import waveGeometryShader from './shaders/wave-geometry.wgsl?raw';
 import postShader from './shaders/post.wgsl?raw';
-import sprayShader from './shaders/spray.wgsl?raw';
-import { toggleOceanSound, updateBreakerPosition, setListenerPosition } from './ocean-sound.js';
-
-const MAX_PARTICLES = 8192;
-const SPRAY_WORKGROUP_SIZE = 64;
-
-// Inline WGSL for the spray point-sprite render pass. Kept here (not a .wgsl
-// file) because it shares the Particle struct layout with shaders/spray.wgsl.
-const SPRAY_VERTEX_WGSL = `
-  struct Uniforms {
-    viewProjection: mat4x4f,
-    cameraPos: vec4f,
-    viewport: vec4f,
-    pointer: vec4f,
-    misc: vec4f,
-    sun: vec4f,
-    camRight: vec4f,
-    camUp: vec4f,
-    forward: vec4f,
-  }
-  struct Particle {
-    position: vec4f,  // xyz world space, w = life (seconds remaining)
-    velocity: vec4f,  // xyz velocity, w = size
-    color: vec4f,     // rgb tint, w = alpha
-    spin: vec4f,      // x = isSpray flag, y = spin, z = spin rate, w = unused
-  }
-  @group(0) @binding(0) var<uniform> u: Uniforms;
-  @group(0) @binding(1) var<storage, read> particles: array<Particle>;
-
-  struct VSOut {
-    @builtin(position) position: vec4f,
-    @location(0) color: vec4f,
-    @location(1) uv: vec2f,
-  }
-
-  // Two triangles forming a camera-facing quad in local [-1,1] space.
-  const QUAD = array<vec2f, 6>(
-    vec2f(-1.0, -1.0),
-    vec2f( 1.0, -1.0),
-    vec2f(-1.0,  1.0),
-    vec2f(-1.0,  1.0),
-    vec2f( 1.0, -1.0),
-    vec2f( 1.0,  1.0),
-  );
-
-  @vertex
-  fn main(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> VSOut {
-    let p = particles[ii];
-    var out: VSOut;
-    if (p.position.w <= 0.0) {
-      out.position = vec4f(0.0, 0.0, 0.0, 0.0);
-      out.color = vec4f(0.0);
-      out.uv = vec2f(0.0);
-      return out;
-    }
-
-    let corner = QUAD[vi];
-    let angle = p.spin.y;
-    let ca = cos(angle);
-    let sa = sin(angle);
-    let rc = vec2f(corner.x * ca - corner.y * sa, corner.x * sa + corner.y * ca);
-
-    // Local billboard-space offset, in units of world-space particle size.
-    var local = rc;
-    if (p.spin.x > 0.5) {
-      // Shard: elongate along the particle's velocity, projected onto the
-      // billboard plane, so it reads as a streak rather than a dot.
-      var dir = vec3f(0.0, 1.0, 0.0);
-      let velLen = length(p.velocity.xyz);
-      if (velLen > 1e-4) { dir = p.velocity.xyz / velLen; }
-      let vRight = dot(dir, u.camRight.xyz);
-      let vUp = dot(dir, u.camUp.xyz);
-      let vlen = max(length(vec2f(vRight, vUp)), 1e-3);
-      let along = vec2f(vRight, vUp) / vlen;
-      let perp = vec2f(-along.y, along.x);
-      let comp = vec2f(dot(rc, along), dot(rc, perp));
-      local = comp.x * along * 1.9 + comp.y * perp * 0.7;
-    }
-
-    let worldOffset = (u.camRight.xyz * local.x + u.camUp.xyz * local.y) * p.velocity.w;
-    let worldPos = p.position.xyz + worldOffset;
-    out.position = u.viewProjection * vec4f(worldPos, 1.0);
-    out.uv = rc;
-    out.color = p.color;
-    return out;
-  }
-`;
-const SPRAY_FRAGMENT_WGSL = `
-  struct VSOut {
-    @builtin(position) position: vec4f,
-    @location(0) color: vec4f,
-    @location(1) uv: vec2f,
-  }
-  @fragment
-  fn main(in: VSOut) -> @location(0) vec4f {
-    // Hard elliptical cut: no soft radial alpha, just a flat plate with a
-    // separate keyline so it reads as woodblock ink rather than a glow.
-    let r = length(in.uv);
-    if (r > 1.0) { discard; }
-    let edge = smoothstep(0.80, 0.96, r);
-    let rgb = mix(in.color.rgb, vec3f(0.12, 0.22, 0.45), edge);
-    return vec4f(rgb, in.color.a);
-  }
-`;
+import { toggleOceanSound, setListenerPosition } from './ocean-sound.js';
 
 const canvas = document.querySelector('#ocean');
 const experience = document.querySelector('#experience');
@@ -122,13 +17,9 @@ const SIMULATION_CELLS = SIMULATION_SIZE * SIMULATION_SIZE;
 const FFT_STAGES = Math.log2(SIMULATION_SIZE);
 const OCEAN_COLUMNS = 360;
 const OCEAN_ROWS = 248;
-const WAVE_COLUMNS = 288;
-const WAVE_ROWS = 176;
-const WAVE_INSTANCES = 3;
-const CLAW_COLUMNS = 1024;
-const CLAW_ROWS = 40;
+
 const DYNAMIC_SUBSTEPS = 4;
-const UNIFORM_FLOATS = 52;
+const UNIFORM_FLOATS = 48;
 const UNIFORM_SIZE = UNIFORM_FLOATS * Float32Array.BYTES_PER_ELEMENT;
 const COMPUTE_PARAMS_SIZE = 32;
 const RESOLVE_PARAMS_SIZE = 16;
@@ -136,27 +27,9 @@ const HDR_FORMAT = 'rgba16float';
 const SAMPLE_COUNT = 4;
 
 // Breaker placement. The wave sheets are placed from simulation data: a
-// compute pass scores every cell for how hard it is breaking, a reduction
-// collapses the scores onto a coarse block lattice, and the CPU reads the
-// lattice back and maintains up to one breaker per wave-sheet instance.
-const BREAKER_DOMAIN = 84;
-const BREAKER_BLOCKS = 8;
-const BLOCK_FLOATS = 16;
-const SUMMARY_FLOATS = BREAKER_BLOCKS * BREAKER_BLOCKS * BLOCK_FLOATS;
-const READBACK_INTERVAL = 20;
-const BREAKER_MATCH_RADIUS = 26;
-const BREAKER_ENVELOPE_SECONDS = 2.2;
 
 const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-// ============================================================================
-// #10 — Deterministic Hero Wave state machine + development capture mode.
-//
-// The hero wave is a deterministic preset driven by an explicit normalized
-// phase (0..1), separate from the simulation detection that still feeds the
-// ambient breakers. Same preset/seed/phase/camera must always produce the same
-// scene so visual regressions can be measured (#5).
-// ============================================================================
 
 // Deterministic 32-bit RNG (mulberry32) is defined later in this file; reused
 // here so the hero curves stay free of Math.random().
@@ -169,58 +42,7 @@ function smoothstep(e0, e1, x) {
 }
 
 
-// Global development/hero configuration parsed from the URL. Defaults are set so
-// the existing simulation-driven composition still runs unchanged when no flags
-// are present.
-const DEV = {
-  debug: 0,         // 0=off, 1=regions tint (see docs/art-direction-params.md)
-  test: false,      // ?test=1 => live slider panel for empirical tuning
-};
-
-function parseDevParams() {
-  const q = new URLSearchParams(window.location.search);
-  if (q.has('debug')) DEV.debug = q.get('debug') === 'regions' ? 1 : (parseInt(q.get('debug'), 10) || 0);
-  // ?test=1: debug panel (region overlay checkbox + legend)
-  if (q.has('test')) DEV.test = q.get('test') === '1' || q.get('test') === 'true';
-}
-
-// Debug panel: region-overlay checkbox + color legend. Injected when ?test=1.
-function buildTestPanel() {
-  const panel = document.createElement('div');
-  panel.style.cssText = 'position:fixed;top:10px;right:10px;width:250px;background:rgba(0,0,0,0.85);color:#eee;padding:10px;border-radius:8px;font:12px/1.4 monospace;z-index:9999;';
-
-  const title = document.createElement('b');
-  title.textContent = '🎨 디버그 패널';
-  panel.appendChild(title);
-
-  // Region overlay checkbox
-  const debugRow = document.createElement('div');
-  debugRow.style.marginTop = '8px';
-  const debugCheck = document.createElement('input');
-  debugCheck.type = 'checkbox';
-  debugCheck.checked = DEV.debug > 0.5;
-  debugCheck.style.marginRight = '6px';
-  debugCheck.onchange = () => { DEV.debug = debugCheck.checked ? 1 : 0; };
-  debugRow.appendChild(debugCheck);
-  const debugLabel = document.createElement('label');
-  debugLabel.textContent = '파도 단면 영역 색상 표시';
-  debugLabel.style.fontSize = '11px';
-  debugRow.appendChild(debugLabel);
-  panel.appendChild(debugRow);
-
-  // Color legend for the region overlay
-  const legend = document.createElement('div');
-  legend.style.cssText = 'margin-top:8px;padding:6px;border:1px solid #555;border-radius:4px;font-size:11px;';
-  legend.innerHTML =
-    '<span style="color:#2d73ff">■</span> face — 물결 앞면<br>' +
-    '<span style="color:#fff">■</span> crest — 파도 꼭대기<br>' +
-    '<span style="color:#ffea14">■</span> hook — 말려 들어간 입술<br>' +
-    '<span style="color:#ff4d33">■</span> tongue — 되감기는 혀';
-  panel.appendChild(legend);
-
-  document.body.appendChild(panel);
-}
-
+;
 
 let device;
 let context;
@@ -236,24 +58,11 @@ let fftBuffers;
 let dynamicBuffers;
 let oceanBuffers;
 
-// ---- GPU resources: breaker detection ----
-let breakerConfigBuffer;
-let breakerScoreBuffer;
-let breakerSummaryBuffer;
-let breakerStagingBuffer;
-let breakerParamsBuffer;
-let foamFingerBuffer;
-let foamVertexBuffer;
-let fractureBuffer;
-let breakerBindGroups;
-
 // ---- Pipelines: compute ----
 let spectralPipeline;
 let fftPipeline;
 let dynamicPipeline;
 let resolvePipeline;
-let scoreBreakersPipeline;
-let reduceBreakersPipeline;
 let evolveBindGroup;
 let fftPasses;
 let dynamicBindGroups;
@@ -265,27 +74,10 @@ let oceanPipeline;
 let postPipeline;
 let postBindGroup;
 let surfaceBindGroups;
-let waveBindGroups;
 let oceanGrid;
-let waveGrid;
-let clawGrid;
-let clawPipeline;
 
-// ---- Spray particle system (compute spawn/update + point render) ----
-let sprayModule;
-let spraySpawnPipeline;
-let sprayUpdatePipeline;
-let sprayBuffer;
-let sprayParamsBuffer;
-let sprayCrestBuffer;
-let sprayBindGroup;
-let sprayRenderPipeline;
-let sprayRenderBindGroup;
-
-// Camera world position for breaker spawn filtering
+// Camera world position (uniform packing)
 let cameraWorldPos = [0.0, 0.0, 0.0];
-let wavePipeline;
-let foamPipeline;
 let sceneTexture;
 let multisampleTexture;
 let depthTexture;
@@ -305,41 +97,6 @@ let oceanBufferIndex = 0;
 let dynamicBufferIndex = 0;
 let frameIndex = 0;
 let dynamicTime = 0;
-
-// ---- Breaker anchor state (CPU side of shaders/breakers.wgsl) ----
-const breakerAnchors = Array.from({ length: 3 }, (_, index) => ({
-  active: false,
-  centerX: 0,
-  centerZ: 0,
-  dirX: 1,
-  dirZ: 0,
-  extent: 22,
-  radius: 8,
-  heightGain: 2.5,
-  curlRate: 0.70,
-  curlWaves: 5.5,
-  phaseOffset: index * 2.4,
-  crestPeak: 0.55,
-  crestWidth: 0.55,
-  thetaSpan: 5.0,
-  taper: 0.5,
-  throwGain: 1.8,
-  detailGain: 1.5,
-  envelope: 0,
-  targetEnvelope: 0,
-  claimed: false,
-  component: null,
-}));
-let breakerReadbackPending = false;
-let breakerSummary = null;
-let breakerDiagFrame = 0;
-let breakerFrameCounter = 0;
-let breakerActivity = 0;
-
-// #6 debug: ?forcebreaker=1 forces a single dominant breaker in front of the
-// camera so the waveProfile() silhouette change can be verified in isolation,
-// regardless of whether the live simulation detection happens to spawn one.
-const FORCE_BREAKER = new URLSearchParams(window.location.search).has('forcebreaker');
 
 function normalize3(vector) {
   const length = Math.hypot(vector[0], vector[1], vector[2]) || 1;
@@ -449,486 +206,6 @@ function createZeroedBuffer(size, usage) {
   return buffer;
 }
 
-// ---- Breaker anchor manager ----
-// Turns the GPU block summary into wave-sheet placement. Blocks are merged
-// into connected components (the domain is a wrapping torus), each component
-// becomes a candidate breaker with a crest line, spread and throw direction,
-// and candidates are matched to persistent anchors with hysteresis so a
-// momentary lull in the numerics does not pop a wave out of existence.
-
-function wrapDelta(from, to) {
-  let delta = from - to;
-  delta -= BREAKER_DOMAIN * Math.round(delta / BREAKER_DOMAIN);
-  return delta;
-}
-
-function wrapDistance(ax, az, bx, bz) {
-  return Math.hypot(wrapDelta(ax, bx), wrapDelta(az, bz));
-}
-
-function wrapIntoDomain(value) {
-  return (((value / BREAKER_DOMAIN + 0.5) % 1) + 1) % 1 * BREAKER_DOMAIN - BREAKER_DOMAIN / 2;
-}
-
-function extractBreakerComponents(summary) {
-  const blockCount = BREAKER_BLOCKS * BREAKER_BLOCKS;
-  const blocks = new Array(blockCount);
-  let globalMax = 0;
-  for (let index = 0; index < blockCount; index += 1) {
-    const offset = index * BLOCK_FLOATS;
-    const block = {
-      maxScore: summary[offset],
-      sumScore: summary[offset + 1],
-      meanX: summary[offset + 2],
-      meanZ: summary[offset + 3],
-      cxx: summary[offset + 4],
-      czz: summary[offset + 5],
-      cxz: summary[offset + 6],
-      momX: summary[offset + 7],
-      momZ: summary[offset + 8],
-      normMax: 0,
-    };
-    globalMax = Math.max(globalMax, block.maxScore);
-    blocks[index] = block;
-  }
-  if (globalMax <= 1e-6) {
-    return [];
-  }
-  for (const block of blocks) {
-    block.normMax = block.maxScore / globalMax;
-  }
-
-  // Connected components over the block lattice, wrapping in both axes.
-  const componentOf = new Map();
-  const components = [];
-  const neighborOffsets = [[1, 0], [-1, 0], [0, 1], [0, -1]];
-  for (let index = 0; index < blockCount; index += 1) {
-    const block = blocks[index];
-    // Absolute score gate: most of the domain carries a faint, meaningless
-    // score (0.00-0.01). Without an absolute threshold the relative normMax
-    // test sweeps all 64 blocks into ONE giant component, so the breaker sheet
-    // becomes a wall spanning the whole domain instead of a localised wave.
-    if (componentOf.has(index)) continue;
-    if (block.maxScore <= 0.08) continue;
-    if (block.normMax <= 0.3 || block.sumScore <= 1e-4) continue;
-    const componentId = components.length;
-    const stack = [index];
-    componentOf.set(index, componentId);
-    const members = [];
-    while (stack.length) {
-      const memberIndex = stack.pop();
-      members.push(blocks[memberIndex]);
-      const bx = memberIndex % BREAKER_BLOCKS;
-      const bz = Math.floor(memberIndex / BREAKER_BLOCKS);
-      for (const [dx, dz] of neighborOffsets) {
-        const nx = (bx + dx + BREAKER_BLOCKS) % BREAKER_BLOCKS;
-        const nz = (bz + dz + BREAKER_BLOCKS) % BREAKER_BLOCKS;
-        const neighborIndex = nz * BREAKER_BLOCKS + nx;
-        if (componentOf.has(neighborIndex)) continue;
-        const neighbor = blocks[neighborIndex];
-        if (neighbor.normMax > 0.3 && neighbor.sumScore > 1e-4) {
-          componentOf.set(neighborIndex, componentId);
-          stack.push(neighborIndex);
-        }
-      }
-    }
-
-    // Aggregate: weight-centred position, spread, principal axis, momentum.
-    let totalWeight = 0;
-    let pivot = members[0];
-    for (const member of members) {
-      totalWeight += member.sumScore;
-      if (member.sumScore > pivot.sumScore) pivot = member;
-    }
-    let sumX = 0;
-    let sumZ = 0;
-    for (const member of members) {
-      sumX += member.sumScore * wrapDelta(member.meanX, pivot.meanX);
-      sumZ += member.sumScore * wrapDelta(member.meanZ, pivot.meanZ);
-    }
-    const centerX = wrapIntoDomain(pivot.meanX + sumX / totalWeight);
-    const centerZ = wrapIntoDomain(pivot.meanZ + sumZ / totalWeight);
-
-    let cxx = 0;
-    let czz = 0;
-    let cxz = 0;
-    let momX = 0;
-    let momZ = 0;
-    let peakNorm = 0;
-    for (const member of members) {
-      const weight = member.sumScore / totalWeight;
-      const dx = wrapDelta(member.meanX, centerX);
-      const dz = wrapDelta(member.meanZ, centerZ);
-      cxx += weight * (member.cxx + dx * dx);
-      czz += weight * (member.czz + dz * dz);
-      cxz += weight * (member.cxz + dx * dz);
-      momX += member.momX;
-      momZ += member.momZ;
-      peakNorm = Math.max(peakNorm, member.normMax);
-    }
-
-    // Principal axis of the breaking region = the crest line. The eigenvector
-    // sign is ambiguous, so it is flipped to match the flow momentum: the wave
-    // throws the way it travels.
-    const gap = Math.hypot(cxx - czz, 2 * cxz);
-    const lambdaMax = 0.5 * (cxx + czz + gap);
-    let theta = 0.5 * Math.atan2(2 * cxz, cxx - czz);
-    if (Math.sin(theta) * momX - Math.cos(theta) * momZ < 0) {
-      theta += Math.PI;
-    }
-    const extent = Math.min(42, Math.max(9, 2.5 * Math.sqrt(Math.max(lambdaMax, 0.4))));
-    components.push({
-      centerX,
-      centerZ,
-      dirX: Math.cos(theta),
-      dirZ: Math.sin(theta),
-      extent,
-      strength: totalWeight * peakNorm,
-      momX,
-      momZ,
-    });
-  }
-  components.sort((a, b) => b.strength - a.strength);
-  return components;
-}
-
-function updateBreakerAnchors(summary) {
-  breakerSummary = summary;
-  const components = extractBreakerComponents(summary);
-  // Filter out breakers too close to the camera
-  const MIN_BREAKER_DIST_FROM_CAMERA = 25.0; // world units
-  const cameraX = cameraWorldPos[0];
-  const cameraZ = cameraWorldPos[2];
-  const filteredComponents = components.filter((c) => {
-    const dx = c.centerX - cameraX;
-    const dz = c.centerZ - cameraZ;
-    return dx * dx + dz * dz >= MIN_BREAKER_DIST_FROM_CAMERA * MIN_BREAKER_DIST_FROM_CAMERA;
-  });
-  if (FORCE_BREAKER) {
-    // Synthesize a breaking component directly ahead of the camera so a breaker
-    // is guaranteed visible for profile verification.
-    filteredComponents.push({
-      centerX: cameraWorldPos[0],
-      centerZ: cameraWorldPos[2] + 55,
-      dirX: 1, dirZ: 0, extent: 22, strength: 1,
-    });
-  }
-  for (const anchor of breakerAnchors) {
-    anchor.claimed = false;
-    anchor.component = null;
-  }
-  for (const component of filteredComponents) {
-    let target = null;
-    let bestDistance = BREAKER_MATCH_RADIUS;
-    for (const anchor of breakerAnchors) {
-      if (anchor.claimed) continue;
-      const distance = wrapDistance(anchor.centerX, anchor.centerZ, component.centerX, component.centerZ);
-      if (distance < bestDistance) {
-        target = anchor;
-        bestDistance = distance;
-      }
-    }
-    if (!target) {
-      target = breakerAnchors.find((anchor) => !anchor.claimed && (!anchor.active || anchor.targetEnvelope < 0.05));
-    }
-    if (!target) break;
-    target.claimed = true;
-    target.active = true;
-    target.component = component;
-    if (target.envelope < 0.02) {
-      // Fresh spawn: snap to the candidate. The envelope then grows the wave
-      // out of the sea over ~2 s, so it rears up instead of popping in.
-      // The sheet stands where the physics actually boils — the simulation
-      // itself is tuned so breaking happens in front of the camera.
-      target.centerX = component.centerX;
-      target.centerZ = component.centerZ;
-      // Spawn orientation: crest is PERPENDICULAR to travel, so the face
-      // advances along the momentum. The principal axis of a huge merged
-      // region is meaningless noise — never use it for facing.
-      const momMag = Math.hypot(component.momX || 0, component.momZ || 0);
-      if (momMag > 1e-3) {
-        const tx = (component.momX || 0) / momMag;
-        const tz = (component.momZ || 0) / momMag;
-        target.dirX = -tz;  // crest = perp(travel) → face along travel
-        target.dirZ = tx;
-      } else {
-        target.dirX = component.dirX;
-        target.dirZ = component.dirZ;
-      }
-      target.extent = component.extent;
-      target.phaseOffset = Math.random() * Math.PI * 2;
-    }
-  }
-
-  const dominantStrength = components.length ? components[0].strength : 1;
-  for (const anchor of breakerAnchors) {
-    if (!anchor.component) {
-      anchor.targetEnvelope = 0;
-      continue;
-    }
-    const component = anchor.component;
-    const relative = Math.min(1, component.strength / dominantStrength);
-    anchor.targetEnvelope = 1;
-    anchor.targetCenterX = component.centerX;
-    anchor.targetCenterZ = component.centerZ;
-    // LOCK the crest orientation for the wave's lifetime. Measured: the
-    // principal axis of the huge merged region swings -156°→-72°→8°→-90°→-172°
-    // frame to frame (pure noise); following it yaws the sheet like a spinning
-    // plate. A travelling wave keeps its crest direction — set once at spawn.
-    anchor.targetDirX = anchor.dirX;
-    anchor.targetDirZ = anchor.dirZ;
-    anchor.targetExtent = component.extent;
-    // Model parameters derived from how dominant this breaker is: the great
-    // wave rears over a short crest stretch with a deep spiral, lesser waves
-    // break faster and shallower.
-    // Add seeded variation per component for less homogeneity.
-    const seed = component.centerX * 12.9898 + component.centerZ * 78.233 + component.extent * 45.164;
-    const rand = mulberry32(Math.abs(seed >>> 0));
-    const varScale = 0.15 + 0.1 * relative; // more variation for dominant breakers
-    
-    anchor.targetRadius = Math.min(8.5, (1.6 + 6.0 * relative) * (1.0 + (rand() - 0.5) * varScale));
-    anchor.targetHeightGain = Math.min(1.2, (0.42 + 0.58 * relative) * (1.0 + (rand() - 0.5) * varScale));
-    anchor.curlRate = (0.61 - 0.19 * relative) * (1.0 + (rand() - 0.5) * 0.1);
-    anchor.curlWaves = Math.min(8, Math.max(2.5, anchor.extent / 9)) * (1.0 + (rand() - 0.5) * 0.08);
-    anchor.targetCrestPeak = (0.55 - 0.25 * relative) * (1.0 + (rand() - 0.5) * 0.12);
-    anchor.targetCrestWidth = (0.58 - 0.06 * relative) * (1.0 + (rand() - 0.5) * 0.15);
-    anchor.targetThetaSpan = (3.0 + 2.2 * relative) * (1.0 + (rand() - 0.5) * 0.1);
-    anchor.taper = 0.4 * (1.0 + (rand() - 0.5) * 0.2);
-    anchor.targetThrowGain = (0.55 + 0.55 * relative) * (1.0 + (rand() - 0.5) * varScale);
-    anchor.targetDetailGain = Math.min(1.5, (0.7 + 0.6 * relative) * (1.0 + (rand() - 0.5) * 0.12));
-  }
-
-  // Breaker pipeline diagnostics: prints ~1/sec when the debug panel is on so
-  // the failing stage (detect -> camera filter -> anchor claim -> envelope) is
-  // visible in the console.
-  if (DEV.debug > 0.5) {
-    breakerDiagFrame += 1;
-    if (breakerDiagFrame % 60 === 0) {
-      const claimed = breakerAnchors.filter((a) => a.component).length;
-      const sample = components.slice(0, 3).map((c) =>
-        `(${c.centerX.toFixed(0)},${c.centerZ.toFixed(0)}) s=${c.strength.toFixed(0)} 각=${(Math.atan2(c.dirZ, c.dirX) * 180 / Math.PI).toFixed(0)}d 모m=(${c.momX.toFixed(1)},${c.momZ.toFixed(1)}) ext=${c.extent.toFixed(0)}`).join(' | ');
-      const claimedAnchor = breakerAnchors.find((a) => a.component);
-      const anchorAngle = claimedAnchor ? (Math.atan2(claimedAnchor.dirZ, claimedAnchor.dirX) * 180 / Math.PI).toFixed(0) : '-';
-      console.log(
-        `[breaker] 감지=${components.length} 통과=${filteredComponents.length} 획득=${claimed} env=[${breakerAnchors.map((a) => a.envelope.toFixed(2)).join(',')}] 앵커각=${anchorAngle}d`,
-        components.length ? `최대: ${sample}` : '컴포넌트 없음'
-      );
-      // Raw GPU summary: where does the detection actually score?
-      const active = [];
-      for (let i = 0; i < BREAKER_BLOCKS * BREAKER_BLOCKS; i += 1) {
-        const o = i * BLOCK_FLOATS;
-        if (summary[o] > 1e-4) {
-          active.push(`b${i}(${summary[o + 2].toFixed(0)},${summary[o + 3].toFixed(0)}) s=${summary[o].toFixed(2)}`);
-        }
-      }
-      console.log(`[breaker] GPU 활성블록 ${active.length}/64:`, active.slice(0, 12).join(' '));
-      console.log(`[breaker] 카메라=(${cameraWorldPos[0].toFixed(0)},${cameraWorldPos[2].toFixed(0)})`);
-    }
-  }
-}
-
-function smoothBreakerAnchors(deltaSeconds) {
-  const positionRate = 1 - Math.exp(-deltaSeconds * 1.6);
-  const shapeRate = 1 - Math.exp(-deltaSeconds * 1.1);
-  const envelopeStep = deltaSeconds / BREAKER_ENVELOPE_SECONDS;
-  let activity = 0;
-  for (const anchor of breakerAnchors) {
-    if (anchor.claimed) {
-      anchor.centerX += wrapDelta(anchor.targetCenterX, anchor.centerX) * positionRate;
-      anchor.centerZ += wrapDelta(anchor.targetCenterZ, anchor.centerZ) * positionRate;
-      anchor.centerX = wrapIntoDomain(anchor.centerX);
-      anchor.centerZ = wrapIntoDomain(anchor.centerZ);
-      // Shortest-path angle blend.
-      let angleFrom = Math.atan2(anchor.dirZ, anchor.dirX);
-      let angleTo = Math.atan2(anchor.targetDirZ, anchor.targetDirX);
-      let angleDelta = angleTo - angleFrom;
-      angleDelta -= Math.round(angleDelta / (Math.PI * 2)) * Math.PI * 2;
-      angleFrom += angleDelta * positionRate;
-      anchor.dirX = Math.cos(angleFrom);
-      anchor.dirZ = Math.sin(angleFrom);
-      anchor.extent += (anchor.targetExtent - anchor.extent) * shapeRate;
-      anchor.radius += (anchor.targetRadius - anchor.radius) * shapeRate;
-      anchor.heightGain += (anchor.targetHeightGain - anchor.heightGain) * shapeRate;
-      anchor.crestPeak += (anchor.targetCrestPeak - anchor.crestPeak) * shapeRate;
-      anchor.crestWidth += (anchor.targetCrestWidth - anchor.crestWidth) * shapeRate;
-      anchor.thetaSpan += (anchor.targetThetaSpan - anchor.thetaSpan) * shapeRate;
-      anchor.throwGain += (anchor.targetThrowGain - anchor.throwGain) * shapeRate;
-      anchor.detailGain += (anchor.targetDetailGain - anchor.detailGain) * shapeRate;
-    } else {
-      // Dying — envelope heads to 0 and active clears when fully gone.
-    }
-    anchor.envelope = Math.max(0, Math.min(1, anchor.envelope + (anchor.targetEnvelope - anchor.envelope > 0 ? envelopeStep : -envelopeStep)));
-    if (anchor.envelope <= 0.0) {
-      anchor.active = false;
-    }
-    activity += anchor.envelope;
-  }
-  breakerActivity = activity / breakerAnchors.length;
-}
-
-
-// #8 FoamFinger — generate 2-3 fingers per active breaker and pack into buffer.
-const MAX_FINGERS = 16;
-// #12 FractureFeature — pack meso-scale fracture features.
-const MAX_FRACTURES = 4;
-function writeFractureFeatures() {
-  const data = new Float32Array(MAX_FRACTURES * 16);
-  let count = 0;
-  breakerAnchors.forEach((anchor) => {
-    if (anchor.envelope < 0.01 || count >= MAX_FRACTURES) return;
-    // One fracture feature at the hook/tongue transition
-    const off = count * 16;
-    data[off+0] = 0.72; data[off+1] = 0.78; data[off+2] = 0.08; data[off+3] = 0.12; // region
-    data[off+4] = 0.5; data[off+5] = 0.0; data[off+6] = 0.0; data[off+7] = 0.3; // shape
-    data[off+8] = 0.36; data[off+9] = 0.58; data[off+10] = 1.0; data[off+11] = 0.0; // life
-    count++;
-  });
-  device.queue.writeBuffer(fractureBuffer, 0, data);
-  return count;
-}
-
-function writeFoamFingers() {
-  const data = new Float32Array(MAX_FINGERS * 16);
-  let count = 0;
-  breakerAnchors.forEach((anchor) => {
-    if (anchor.envelope < 0.01 || count >= MAX_FINGERS - 2) return;
-    const baseSeed = anchor.phaseOffset || 0;
-    const r = anchor.radius;
-    // Primary finger at hook/tongue transition
-    let off = count * 20;
-    data[off+0] = 0.72; data[off+1] = 0.78; data[off+2] = -1; data[off+3] = 0;
-    data[off+4] = 0.3; data[off+5] = 0.4; data[off+6] = r*0.6; data[off+7] = 0.012;
-    data[off+8] = 0.5; data[off+9] = 0.7; data[off+10] = 0.1; data[off+11] = baseSeed;
-    data[off+12] = baseSeed; data[off+13] = 1.0; data[off+14] = 0; data[off+15] = 0;
-    // worldPos: approximate position (camera-facing)
-    data[off+16] = anchor.centerX; data[off+17] = anchor.heightGain * 2.0; data[off+18] = anchor.centerZ; data[off+19] = 0;
-    count++;
-    if (count >= MAX_FINGERS) return;
-    // Secondary finger
-    off = count * 20;
-    data[off+0] = 0.75; data[off+1] = 0.82; data[off+2] = 0; data[off+3] = 1;
-    data[off+4] = 0.5; data[off+5] = 0.6; data[off+6] = r*0.35; data[off+7] = 0.008;
-    data[off+8] = 0.7; data[off+9] = 0.5; data[off+10] = 0.2; data[off+11] = baseSeed+0.3;
-    data[off+12] = baseSeed+0.3; data[off+13] = 0.8; data[off+14] = 0; data[off+15] = 0;
-    count++;
-  });
-  device.queue.writeBuffer(foamFingerBuffer, 0, data);
-  return count;
-}
-
-function writeBreakerParams() {
-  const data = new Float32Array(breakerAnchors.length * 40);
-  breakerAnchors.forEach((anchor, index) => {
-    const offset = index * 40;
-    const halfSpan = anchor.extent * 0.5;
-    const envelope = anchor.envelope;
-    data[offset + 0] = anchor.centerX - anchor.dirX * halfSpan;
-    data[offset + 1] = 0;
-    data[offset + 2] = anchor.centerZ - anchor.dirZ * halfSpan;
-    data[offset + 3] = 0;
-    data[offset + 4] = anchor.centerX + anchor.dirX * halfSpan;
-    data[offset + 5] = 0;
-    data[offset + 6] = anchor.centerZ + anchor.dirZ * halfSpan;
-    data[offset + 7] = anchor.radius * envelope;
-    data[offset + 8] = anchor.heightGain * envelope;
-    data[offset + 9] = anchor.curlRate;
-    data[offset + 10] = anchor.curlWaves;
-    data[offset + 11] = anchor.phaseOffset;
-    data[offset + 12] = anchor.crestPeak;
-    data[offset + 13] = anchor.crestWidth;
-    data[offset + 14] = anchor.thetaSpan;
-    data[offset + 15] = anchor.taper;
-    data[offset + 16] = anchor.throwGain;
-    data[offset + 17] = anchor.detailGain;
-    data[offset + 18] = envelope > 0.01 ? 1 : 0;
-    data[offset + 19] = 0;
-    // CrestCurve: pack cubic Bezier control points so waveSample can bow the crest
-    // toward the camera. p0..p3 define the 3D centreline; shape.y = forwardBow.
-    if (anchor.component) {
-      const ox = data[offset + 0], oz = data[offset + 2];
-      const dx = data[offset + 4] - ox, dz = data[offset + 6] - oz;
-      const perpX = -dz, perpZ = dx;
-      const perpLen = Math.hypot(perpX, perpZ) || 1;
-      // The ridge curvature is physics, not framing: the crest of a plunging
-      // breaker arches the way the wave TRAVELS (its own principal axis /
-      // travel direction), never toward the camera. Project the wave's travel
-      // direction onto the ridge normal to get the bow, signed so it can lean
-      // either way depending on how the wave actually throws.
-      const travelX = anchor.dirX || 0.0;
-      const travelZ = anchor.dirZ || 0.0;
-      const travelProj = (travelX * perpX + travelZ * perpZ) / perpLen;
-      // Bow is a fraction of the crest length, gently arched (never dramatic).
-      const bowAmt = travelProj * 0.12 * Math.min(1.0, perpLen / 20.0);
-      // p0 = originA, p3 = originB
-      data[offset + 20] = ox; data[offset + 21] = 0; data[offset + 22] = oz; data[offset + 23] = 0;
-      data[offset + 32] = ox + dx; data[offset + 33] = 0; data[offset + 34] = oz + dz; data[offset + 35] = 0;
-      // p1, p2 bow toward camera
-      data[offset + 24] = ox + dx * 0.33 + perpX * bowAmt; data[offset + 25] = 0; data[offset + 26] = oz + dz * 0.33 + perpZ * bowAmt; data[offset + 27] = 0;
-      data[offset + 28] = ox + dx * 0.66 + perpX * bowAmt; data[offset + 29] = 0; data[offset + 30] = oz + dz * 0.66 + perpZ * bowAmt; data[offset + 31] = 0;
-      // shape: peakU=0.5, forwardBow=bowAmt, bank=0, seed=phaseOffset
-      data[offset + 36] = 0.5; data[offset + 37] = bowAmt; data[offset + 38] = 0; data[offset + 39] = anchor.phaseOffset || 0;
-    }
-  });
-  device.queue.writeBuffer(breakerParamsBuffer, 0, data);
-}
-
-// Packs active breaker crest lines into the format the spray compute shader reads.
-function writeSprayCrest() {
-  const data = new Float32Array(WAVE_INSTANCES * 16);
-  breakerAnchors.forEach((anchor, index) => {
-    const offset = index * 16;
-    const halfSpan = anchor.extent * 0.5;
-    data[offset + 0] = anchor.centerX - anchor.dirX * halfSpan;  // startX
-    data[offset + 1] = 0;                                        // startY
-    data[offset + 2] = anchor.centerZ - anchor.dirZ * halfSpan;  // startZ
-    data[offset + 3] = anchor.centerX + anchor.dirX * halfSpan;  // endX
-    data[offset + 4] = 0;                                        // endY
-    data[offset + 5] = anchor.centerZ + anchor.dirZ * halfSpan;  // endZ
-    data[offset + 6] = anchor.radius * anchor.envelope;          // radius
-    data[offset + 7] = anchor.heightGain * anchor.envelope;      // heightGain
-    data[offset + 8] = anchor.curlRate;
-    data[offset + 9] = anchor.curlWaves;
-    data[offset + 10] = anchor.phaseOffset;
-    data[offset + 11] = anchor.crestPeak;
-    data[offset + 12] = anchor.crestWidth;
-    data[offset + 13] = anchor.thetaSpan;
-    data[offset + 14] = anchor.taper;
-    data[offset + 15] = anchor.envelope;                         // envelope
-  });
-  device.queue.writeBuffer(sprayCrestBuffer, 0, data);
-}
-
-function scheduleBreakerReadback(encoder) {
-  if (breakerReadbackPending) return;
-  breakerReadbackPending = true;
-  encoder.copyBufferToBuffer(breakerSummaryBuffer, 0, breakerStagingBuffer, 0, SUMMARY_FLOATS * 4);
-}
-
-function completeBreakerReadback() {
-  breakerStagingBuffer.mapAsync(GPUMapMode.READ).then(() => {
-    const copy = new Float32Array(SUMMARY_FLOATS);
-    copy.set(new Float32Array(breakerStagingBuffer.getMappedRange()));
-    breakerStagingBuffer.unmap();
-    breakerReadbackPending = false;
-    updateBreakerAnchors(copy);
-  }).catch(() => {
-    breakerReadbackPending = false;
-  });
-}
-
-// Debug/verification hook: lets a headless run inspect what the detection
-// pass found and where the anchors stand.
-window.__OCEAN_BREAKERS__ = {
-  summary: () => (breakerSummary ? Array.from(breakerSummary) : null),
-  anchors: () => breakerAnchors.map((anchor) => ({
-    active: anchor.active,
-    centerX: Number(anchor.centerX.toFixed(2)),
-    centerZ: Number(anchor.centerZ.toFixed(2)),
-    extent: Number(anchor.extent.toFixed(2)),
-    envelope: Number(anchor.envelope.toFixed(3)),
-  })),
-};
-
 function mulberry32(seed) {
   let state = seed >>> 0;
   return () => {
@@ -1016,13 +293,9 @@ function createInitialDynamicState() {
     return [x * inverseLength, y * inverseLength];
   };
   const waves = [
-    // Main breaker: placed at the Hokusai composition focus so it naturally
-    // breaks within the frame. Higher amplitude and tighter width give a
-    // plunging crest that the breaker sheets can ride.
-    // Main breaker: travels ACROSS the frame (+x) at a fixed depth in front of
-    // the camera (z≈12 = 44 units ahead of the camera at z≈-32). The domain is
-    // a wrapping torus, so the wave cycles in x but always stays at breaking
-    // depth in view — whenever it grows tall enough to break, it is on screen.
+    // Dominant travelling swell: crosses the frame (+x) at a fixed depth
+    // in front of the camera (z≈12). The domain wraps in x, so the swell
+    // cycles but always stays in view.
     { direction: normalize2([0.98, 0.20]), center: [0.0, 12.0], amplitude: 4.20, modulation: 0.10, phase: 0.6 },
     { direction: normalize2([-0.55, 0.83]), center: [7, 3], amplitude: 1.80, modulation: 0.12, phase: 2.0 },
     { direction: normalize2([0.90, -0.44]), center: [-18, 27], amplitude: 1.20, modulation: 0.08, phase: -1.1 },
@@ -1242,33 +515,27 @@ async function initialize() {
   format = navigator.gpu.getPreferredCanvasFormat();
 
   createCoreBuffers();
-  createBreakerBuffers();
   createGrids();
 
   // Compile every shader module up front; checkedModule throws on WGSL errors.
-  const [spectralModule, dynamicModule, resolveModule, breakersModule, sceneModule, postModule, sprayModule] = await Promise.all([
+  const [spectralModule, dynamicModule, resolveModule, sceneModule, postModule] = await Promise.all([
     checkedModule('Spectral ocean compute', spectralShader),
     checkedModule('Dynamic water compute', dynamicShader),
     checkedModule('Ocean field resolve', resolveShader),
-    checkedModule('Breaker detection', breakersShader),
-    checkedModule('Ocean scene', `${sceneShader}\n${waveGeometryShader}`),
+    checkedModule('Ocean scene', sceneShader),
     checkedModule('HDR post process', postShader),
-    checkedModule('Spray particles', sprayShader),
   ]);
 
   createComputeAndScenePipelines({
-    spectralModule, dynamicModule, resolveModule, breakersModule, sceneModule, postModule,
+    spectralModule, dynamicModule, resolveModule, sceneModule, postModule,
   });
-  createSpraySystem(sprayModule);
 
   resize();
   experience.classList.add('is-ready');
   // Parse URL flags before the render loop.
-  parseDevParams();
   // Reset timers right before starting render loop so first frame has elapsed ≈ 0
   startTime = performance.now();
   previousFrame = performance.now();
-  if (DEV.test) buildTestPanel();
   frameRequest = requestAnimationFrame(draw);
 }
 
@@ -1310,34 +577,8 @@ function createCoreBuffers() {
   ];
 }
 
-// Breaker scoring + CPU anchor readback buffers.
-function createBreakerBuffers() {
-  breakerConfigBuffer = device.createBuffer({
-    size: 48,
-    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-  });
-  breakerScoreBuffer = createZeroedBuffer(SIMULATION_CELLS * 4, GPUBufferUsage.STORAGE);
-  breakerSummaryBuffer = createZeroedBuffer(SUMMARY_FLOATS * 4, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC);
-  breakerStagingBuffer = device.createBuffer({
-    size: SUMMARY_FLOATS * 4,
-    usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-  });
-  breakerParamsBuffer = createZeroedBuffer(breakerAnchors.length * 40 * 4, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
-  foamFingerBuffer = createZeroedBuffer(16 * 16 * 4, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
-  foamVertexBuffer = device.createBuffer({
-    size: 4 * 2 * 4, // 4 vertices, vec2f each
-    usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
-    mappedAtCreation: true,
-  });
-  new Float32Array(foamVertexBuffer.getMappedRange()).set([0,0, 1,0, 0,1, 1,1]);
-  foamVertexBuffer.unmap();
-  fractureBuffer = createZeroedBuffer(4 * 16 * 4, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST); // 4 features max // 16 fingers max, 16 floats each
-}
-
 function createGrids() {
   oceanGrid = createGrid(OCEAN_COLUMNS, OCEAN_ROWS);
-  waveGrid = createGrid(WAVE_COLUMNS, WAVE_ROWS);
-  clawGrid = createGrid(CLAW_COLUMNS, CLAW_ROWS);
 }
 
 function dispatchCompute(encoder, pipeline, bindGroup, x, y = 1) {
@@ -1354,10 +595,10 @@ function setGrid(pass, grid) {
 }
 
 // Builds every GPU pipeline the frame loop needs: the compute simulation chain
-// (spectral → fft → dynamic → resolve → breaker score/reduce) and the scene
-// render passes (background, ocean, wave sheets, claws, post).
+// (spectral → fft → dynamic → resolve) and the scene
+// render passes (background, ocean, post).
 function createComputeAndScenePipelines(modules) {
-  const { spectralModule, dynamicModule, resolveModule, breakersModule, sceneModule, postModule } = modules;
+  const { spectralModule, dynamicModule, resolveModule, sceneModule, postModule } = modules;
 
   // ---- Compute: spectral ocean + FFT ----
   const spectralLayout = device.createBindGroupLayout({
@@ -1435,36 +676,6 @@ function createComputeAndScenePipelines(modules) {
       ],
     })));
 
-  // ---- Compute: breaker detection ----
-  const breakerLayout = device.createBindGroupLayout({
-    entries: [
-      { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
-      { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage' } },
-      { binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage' } },
-      { binding: 3, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
-      { binding: 4, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
-    ],
-  });
-  const breakerPipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [breakerLayout] });
-  scoreBreakersPipeline = device.createComputePipeline({
-    layout: breakerPipelineLayout,
-    compute: { module: breakersModule, entryPoint: 'scoreBreakers' },
-  });
-  reduceBreakersPipeline = device.createComputePipeline({
-    layout: breakerPipelineLayout,
-    compute: { module: breakersModule, entryPoint: 'reduceBreakers' },
-  });
-  breakerBindGroups = [0, 1].map((oceanIndex) => [0, 1].map((dynamicIndex) => device.createBindGroup({
-    layout: breakerLayout,
-    entries: [
-      { binding: 0, resource: { buffer: breakerConfigBuffer } },
-      { binding: 1, resource: { buffer: oceanBuffers[oceanIndex] } },
-      { binding: 2, resource: { buffer: dynamicBuffers[dynamicIndex] } },
-      { binding: 3, resource: { buffer: breakerScoreBuffer } },
-      { binding: 4, resource: { buffer: breakerSummaryBuffer } },
-    ],
-  })));
-
   // ---- Scene render: surface bind groups ----
   const surfaceLayout = device.createBindGroupLayout({
     entries: [
@@ -1480,28 +691,6 @@ function createComputeAndScenePipelines(modules) {
       { binding: 1, resource: { buffer } },
     ],
   }));
-  // The wave sheets additionally read their placement data, so their bind
-  // groups carry one more entry than the sea and background.
-  const breakerSurfaceLayout = device.createBindGroupLayout({
-    entries: [
-      { binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } },
-      { binding: 1, visibility: GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } },
-      { binding: 2, visibility: GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } },
-      { binding: 5, visibility: GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } },
-      { binding: 6, visibility: GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } },
-    ],
-  });
-  waveBindGroups = oceanBuffers.map((buffer) => device.createBindGroup({
-    layout: breakerSurfaceLayout,
-    entries: [
-      { binding: 0, resource: { buffer: uniformBuffer } },
-      { binding: 1, resource: { buffer } },
-      { binding: 2, resource: { buffer: breakerParamsBuffer } },
-      { binding: 5, resource: { buffer: foamFingerBuffer } },
-      { binding: 6, resource: { buffer: fractureBuffer } },
-    ],
-  }));
-
   const colorTarget = { format: HDR_FORMAT };
   const depthStencil = {
     format: 'depth24plus',
@@ -1535,30 +724,6 @@ function createComputeAndScenePipelines(modules) {
     ...surfaceBase,
     vertex: { ...surfaceVertex, entryPoint: 'oceanVertex' },
   });
-  const breakerSurfaceBase = {
-    ...surfaceBase,
-    layout: device.createPipelineLayout({ bindGroupLayouts: [breakerSurfaceLayout] }),
-  };
-  wavePipeline = device.createRenderPipeline({
-    ...breakerSurfaceBase,
-    vertex: { ...surfaceVertex, entryPoint: 'waveVertex' },
-  });
-  foamPipeline = device.createRenderPipeline({
-    layout: 'auto',
-    vertex: { module: sceneModule, entryPoint: 'foamVertex', buffers: [{
-      arrayStride: 8,
-      attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x2' }],
-    }] },
-    fragment: { module: sceneModule, entryPoint: 'surfaceFragment', targets: [{ format, blend: { color: { srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha' }, alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' } } }] },
-    primitive: { topology: 'triangle-strip', cullMode: 'none' },
-    depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less' },
-  });
-
-  clawPipeline = device.createRenderPipeline({
-    ...breakerSurfaceBase,
-    vertex: { ...surfaceVertex, entryPoint: 'clawVertex' },
-  });
-
   postPipeline = device.createRenderPipeline({
     layout: 'auto',
     vertex: { module: postModule, entryPoint: 'postVertex' },
@@ -1570,78 +735,6 @@ function createComputeAndScenePipelines(modules) {
     minFilter: 'linear',
     addressModeU: 'clamp-to-edge',
     addressModeV: 'clamp-to-edge',
-  });
-}
-
-// Spray particle system: compute spawn/update pipelines + point-sprite render.
-// Render WGSL is inline (SPRAY_VERTEX_WGSL / SPRAY_FRAGMENT_WGSL) because it
-// shares the Particle struct layout with shaders/spray.wgsl.
-function createSpraySystem(sprayModule) {
-  const sprayLayout = device.createBindGroupLayout({
-    entries: [
-      { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
-      { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage' } },
-      { binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
-    ],
-  });
-  const sprayPipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [sprayLayout] });
-  spraySpawnPipeline = device.createComputePipeline({
-    layout: sprayPipelineLayout,
-    compute: { module: sprayModule, entryPoint: 'spawnSpray' },
-  });
-  sprayUpdatePipeline = device.createComputePipeline({
-    layout: sprayPipelineLayout,
-    compute: { module: sprayModule, entryPoint: 'updateSpray' },
-  });
-
-  // Spray parameters (elapsed, delta, spawnRate, instanceCount) + padding.
-  sprayParamsBuffer = device.createBuffer({
-    size: 32,
-    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-  });
-  // Crest data: one BreakerCrest (16 floats) per wave instance.
-  sprayCrestBuffer = device.createBuffer({
-    size: WAVE_INSTANCES * 16 * 4,
-    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-  });
-  // Particle storage: MAX_PARTICLES * 64 bytes (4 x vec4f).
-  sprayBuffer = device.createBuffer({
-    size: MAX_PARTICLES * 64,
-    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-  });
-  sprayBindGroup = device.createBindGroup({
-    layout: sprayLayout,
-    entries: [
-      { binding: 0, resource: { buffer: sprayParamsBuffer } },
-      { binding: 1, resource: { buffer: sprayCrestBuffer } },
-      { binding: 2, resource: { buffer: sprayBuffer } },
-    ],
-  });
-
-  // Spray render pipeline: instanced billboard quads, 4x MSAA to match scene pass.
-  const sprayVertexModule = device.createShaderModule({ code: SPRAY_VERTEX_WGSL });
-  const sprayFragmentModule = device.createShaderModule({ code: SPRAY_FRAGMENT_WGSL });
-  sprayRenderPipeline = device.createRenderPipeline({
-    layout: 'auto',
-    vertex: { module: sprayVertexModule, entryPoint: 'main' },
-    fragment: {
-      module: sprayFragmentModule,
-      entryPoint: 'main',
-      targets: [{ format: HDR_FORMAT, blend: {
-        color: { srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha', operation: 'add' },
-        alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha', operation: 'add' },
-      }}],
-    },
-    primitive: { topology: 'triangle-list' },
-    depthStencil: { format: 'depth24plus', depthWriteEnabled: false, depthCompare: 'less' },
-    multisample: { count: SAMPLE_COUNT },
-  });
-  sprayRenderBindGroup = device.createBindGroup({
-    layout: sprayRenderPipeline.getBindGroupLayout(0),
-    entries: [
-      { binding: 0, resource: { buffer: uniformBuffer } },
-      { binding: 1, resource: { buffer: sprayBuffer } },
-    ],
   });
 }
 
@@ -1696,15 +789,6 @@ function draw(now) {
     camUp[0], camUp[1], camUp[2]
   );
 
-  // Update spatial sound to follow the main active breaker
-  const activeAnchor = breakerAnchors.find(a => a.active && a.envelope > 0.1);
-  if (activeAnchor) {
-    // Breaker position: center of the crest line, height from wave profile
-    const breakerX = activeAnchor.centerX;
-    const breakerY = activeAnchor.heightGain * activeAnchor.radius * 0.5; // approximate crest height
-    const breakerZ = activeAnchor.centerZ;
-    updateBreakerPosition(breakerX, breakerY, breakerZ, activeAnchor.dirX, activeAnchor.dirZ);
-  }
   const pixelRatio = canvas.clientWidth ? canvas.width / canvas.clientWidth : 1;
   const sunDirection = normalize3([0.31, 0.19, 0.93]);
   const uniforms = new Float32Array(UNIFORM_FLOATS);
@@ -1717,28 +801,11 @@ function draw(now) {
   uniforms.set([camRight[0], camRight[1], camRight[2], tanHalfY * aspect], 36);
   uniforms.set([camUp[0], camUp[1], camUp[2], tanHalfY], 40);
   uniforms.set([forward[0], forward[1], forward[2], 0], 44);
-  // debugMode.x: 0=off, 1=regions tint.
-  uniforms.set([DEV.debug, 0, 0, 0], 48);
   // Mountain removed: background is only sky + clouds now.
   device.queue.writeBuffer(uniformBuffer, 0, uniforms);
   writeEvolveParams(elapsed * motionSpeed, deltaSeconds);
   writeDynamicParams(dynamicTime, dynamicDelta / DYNAMIC_SUBSTEPS, 0);
   device.queue.writeBuffer(resolveParamsBuffer, 0, new Float32Array([dynamicTime, dynamicDelta, 0.45, frameIndex]));
-  // Breaker detection configuration. The focus is the composition prior: the
-  // print wants its breaker mid-frame, left of the mountain, and the prior is
-  // where that preference lives — explicit, not disguised as physics.
-  const breakerConfig = new Float32Array([
-    2.0, 16.0, // focus (world XZ) - moved further right, further forward
-    16.0, 14.0, // ellipse radii - shrunk from 22,18 to cut left side more
-    camera[0], camera[2],
-    6.0,        // minimum distance from camera
-    0.02,       // score floor
-    84.0,       // domainSize
-    elapsed,    // time
-    0.0, 0.0,   // pad
-  ]);
-  device.queue.writeBuffer(breakerConfigBuffer, 0, breakerConfig);
-
   const encoder = device.createCommandEncoder();
   const groups = Math.ceil(SIMULATION_SIZE / 8);
   dispatchCompute(encoder, spectralPipeline, evolveBindGroup, groups, groups);
@@ -1751,31 +818,6 @@ function draw(now) {
   }
   dispatchCompute(encoder, resolvePipeline, resolveBindGroups[oceanBufferIndex][dynamicBufferIndex], groups, groups);
   oceanBufferIndex = 1 - oceanBufferIndex;
-
-  // Score the field for breaking, collapse onto the block lattice, and every
-  // so often copy the lattice back for the CPU anchor manager.
-  dispatchCompute(encoder, scoreBreakersPipeline, breakerBindGroups[oceanBufferIndex][dynamicBufferIndex], groups, groups);
-  dispatchCompute(encoder, reduceBreakersPipeline, breakerBindGroups[oceanBufferIndex][dynamicBufferIndex], BREAKER_BLOCKS, BREAKER_BLOCKS);
-  smoothBreakerAnchors(deltaSeconds);
-  writeBreakerParams();
-  breakerFrameCounter = (breakerFrameCounter + 1) % READBACK_INTERVAL;
-  if (breakerFrameCounter === 0 && moving) {
-    scheduleBreakerReadback(encoder);
-  }
-
-  // ===== Spray particle simulation =====
-  writeSprayCrest();
-  writeFoamFingers();
-  writeFractureFeatures();
-  device.queue.writeBuffer(sprayParamsBuffer, 0, new Float32Array([
-    elapsed,
-    deltaSeconds,
-    moving ? 1.0 : 0.0,    // spawnRate
-    WAVE_INSTANCES,
-    0, 0, 0, 0,
-  ]));
-  dispatchCompute(encoder, spraySpawnPipeline, sprayBindGroup, Math.ceil(WAVE_INSTANCES / SPRAY_WORKGROUP_SIZE));
-  dispatchCompute(encoder, sprayUpdatePipeline, sprayBindGroup, Math.ceil(MAX_PARTICLES / SPRAY_WORKGROUP_SIZE));
 
   const scenePass = encoder.beginRenderPass({
     colorAttachments: [{
@@ -1798,20 +840,6 @@ function draw(now) {
   setGrid(scenePass, oceanGrid);
   scenePass.setPipeline(oceanPipeline);
   scenePass.drawIndexed(oceanGrid.indexCount);
-  scenePass.setBindGroup(0, waveBindGroups[oceanBufferIndex]);
-  setGrid(scenePass, waveGrid);
-  scenePass.setPipeline(wavePipeline);
-  const waveInstanceCount = Math.min(WAVE_INSTANCES, breakerAnchors.length);
-  if (waveInstanceCount > 0) {
-    scenePass.drawIndexed(waveGrid.indexCount, waveInstanceCount);
-    setGrid(scenePass, clawGrid);
-    scenePass.setPipeline(clawPipeline);
-    scenePass.drawIndexed(clawGrid.indexCount, waveInstanceCount);
-  }
-  // Spray particles drawn on top of the ocean, depth-tested against it.
-  scenePass.setBindGroup(0, sprayRenderBindGroup);
-  scenePass.setPipeline(sprayRenderPipeline);
-  scenePass.draw(6, MAX_PARTICLES);
   scenePass.end();
 
   const postPass = encoder.beginRenderPass({
@@ -1828,9 +856,6 @@ function draw(now) {
   postPass.end();
 
   device.queue.submit([encoder.finish()]);
-  if (breakerReadbackPending) {
-    completeBreakerReadback();
-  }
   frameIndex = (frameIndex + 1) % 10_000_000;
   frameRequest = requestAnimationFrame(draw);
 }
