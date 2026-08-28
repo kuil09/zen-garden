@@ -127,7 +127,7 @@ var<workgroup> rMomX: array<f32, 64>;
 var<workgroup> rMomZ: array<f32, 64>;
 
 @compute @workgroup_size(8, 8)
-fn reduceBreakers(@builtin(global_invocation_id) blockId: vec3u,
+fn reduceBreakers(@builtin(workgroup_id) blockId: vec3u,
                   @builtin(local_invocation_id) localId: vec3u) {
   let block = blockId.y * BLOCKS + blockId.x;
   let tid = localId.y * THREADS + localId.x;
