@@ -241,9 +241,13 @@ fn clawLean(coordinate: f32) -> f32 {
 fn surfaceFragment(input: SurfaceOutput) -> @location(0) vec4f {
   // --- Debug overlay: label geometry regions by profile v so the contribution
   // of each element (face/crest/hook/tongue) is isolatable. Off when debugMode.x<=0.
-  // Only apply to wave sheet (not claws, not foam) so only the breaker
-  // cross-section gets colored.
-  if (u.debugMode.x > 0.5 && input.sheetWeight > 0.5) {
+  // In debug mode the claw strip is discarded entirely: it roots at the crest
+  // (v≈0.55) and rises over the hook/tongue, hiding them from view.
+  if (u.debugMode.x > 0.5 && input.sheetWeight > 1.5) {
+    discard;
+  }
+  // Only the wave sheet itself carries the profile v, so only it gets colored.
+  if (u.debugMode.x > 0.5 && input.sheetWeight > 0.5 && input.sheetWeight < 1.5) {
     let v = clamp(input.sheetCoordinates.y, 0.0, 1.0);
     var dbg: vec3f;
     if (v < 0.40) { dbg = vec3f(0.20, 0.45, 1.0); }       // face
