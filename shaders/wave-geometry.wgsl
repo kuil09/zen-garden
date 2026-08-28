@@ -270,32 +270,46 @@ fn waveSample(uv: vec2f, params: WaveParams, time: f32) -> WaveSample {
   let scale = waveCrestScale(uv.x, params) * (params.radius / WAVE_CREST_RADIUS);
   let profile = waveProfile(uv.y, curl, params);
 
-  // Compute base position on the wave surface
-  var basePos = params.originA
+  // Base position on the wave surface (curl-radius units -> world units).
+  var position = params.originA
     + along * (uv.x * span)
     + axis * (profile.x * scale)
     + vec3f(0.0, profile.y * scale, 0.0);
 
-  // Compute normals analytically from the wave profile derivatives
-  let stepU = 1.0 / 320.0;
-  let stepV = 1.0 / 200.0;
-  let uPlus = clamp(uv.x + 1.0/320.0, 0.0, 1.0);
-  let vPlus = clamp(uv.y + 1.0/200.0, 0.0, 1.0);
+  // Analytic normal from profile neighbours (no recursion: recompute locally).
+  let du = 1.0 / 320.0;
+  let dv = 1.0 / 200.0;
+  let uPlus = clamp(uv.x + du, 0.0, 1.0);
+  let vPlus = clamp(uv.y + dv, 0.0, 1.0);
 
-  // Compute positions for tangent estimation
   let curlU = waveCurl(uPlus, params, time);
   let scaleU = waveCrestScale(uPlus, params) * (params.radius / WAVE_CREST_RADIUS);
-  let profileU = waveProfile(uv.y, curl, params);
-  let posU = params.originA + along * (uPlus * span) + axis * (profileU.x * scale) + vec3f(0.0, profileU.y * scale, 0.0);
+  let profileU = waveProfile(uv.y, curlU, params);
+  let posU = params.originA
+    + along * (uPlus * span)
+    + axis * (profileU.x * scaleU)
+    + vec3f(0.0, profileU.y * scaleU, 0.0);
 
   let profileV = waveProfile(vPlus, curl, params);
-  let posV = params.originA + along * (uv.x * span) + axis * (profileV.x * scale) + vec3f(0.0, profileV.y * scale, 0.0);
+  let posV = params.originA
+    + along * (uv.x * span)
+    + axis * (profileV.x * scale)
+    + vec3f(0.0, profileV.y * scale, 0.0);
 
-  basePos = params.originA + along * (uv.x * span) + axis * (profile.x * scale) + vec3f(0.0, profile.y * scale, 0.0);
-  let tangentU = posU - basePos;
-  let tangentV = posV - basePos;
-  // Wave thickness proportional to radius  let thickness = 0.6 * params.radius;  position += normal * ((uv.y - 0.5) * thickness);  // Extrude along normal for thickness
+  let tangentU = posU - position;
+  let tangentV = posV - position;
+  var normal = normalize(cross(tangentV, tangentU));
+  if (length(tangentU) < 1e-6 || length(tangentV) < 1e-6) {
+    normal = vec3f(0.0, 1.0, 0.0);
+  }
 
+  // Give the sheet thickness: offset along the surface normal by a fraction of
+  // the curl radius, so the breaker reads as a mass of water, not a paper sheet.
+  let thickness = 0.35 * scale;
+  position += normal * (uv.y - 0.5) * thickness;
+
+  // The spectral / shallow-water field rides on the sheet as surface detail so
+  // the wave never looks like a static sculpture.
   let field = sampleOceanWorld(position.xz);
   let detail = field.displacementFoam.y * 0.30 * params.detailGain
     * smoothstep(0.0, 0.30, uv.y);
