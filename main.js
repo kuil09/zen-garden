@@ -584,6 +584,8 @@ function extractBreakerComponents(summary) {
       dirZ: Math.sin(theta),
       extent,
       strength: totalWeight * peakNorm,
+      momX,
+      momZ,
     });
   }
   components.sort((a, b) => b.strength - a.strength);
@@ -640,8 +642,19 @@ function updateBreakerAnchors(summary) {
       // itself is tuned so breaking happens in front of the camera.
       target.centerX = component.centerX;
       target.centerZ = component.centerZ;
-      target.dirX = component.dirX;
-      target.dirZ = component.dirZ;
+      // Spawn orientation: crest is PERPENDICULAR to travel, so the face
+      // advances along the momentum. The principal axis of a huge merged
+      // region is meaningless noise — never use it for facing.
+      const momMag = Math.hypot(component.momX || 0, component.momZ || 0);
+      if (momMag > 1e-3) {
+        const tx = (component.momX || 0) / momMag;
+        const tz = (component.momZ || 0) / momMag;
+        target.dirX = -tz;  // crest = perp(travel) → face along travel
+        target.dirZ = tx;
+      } else {
+        target.dirX = component.dirX;
+        target.dirZ = component.dirZ;
+      }
       target.extent = component.extent;
       target.phaseOffset = Math.random() * Math.PI * 2;
     }
@@ -658,8 +671,12 @@ function updateBreakerAnchors(summary) {
     anchor.targetEnvelope = 1;
     anchor.targetCenterX = component.centerX;
     anchor.targetCenterZ = component.centerZ;
-    anchor.targetDirX = component.dirX;
-    anchor.targetDirZ = component.dirZ;
+    // LOCK the crest orientation for the wave's lifetime. Measured: the
+    // principal axis of the huge merged region swings -156°→-72°→8°→-90°→-172°
+    // frame to frame (pure noise); following it yaws the sheet like a spinning
+    // plate. A travelling wave keeps its crest direction — set once at spawn.
+    anchor.targetDirX = anchor.dirX;
+    anchor.targetDirZ = anchor.dirZ;
     anchor.targetExtent = component.extent;
     // Model parameters derived from how dominant this breaker is: the great
     // wave rears over a short crest stretch with a deep spiral, lesser waves
@@ -689,10 +706,12 @@ function updateBreakerAnchors(summary) {
     if (breakerDiagFrame % 60 === 0) {
       const claimed = breakerAnchors.filter((a) => a.component).length;
       const sample = components.slice(0, 3).map((c) =>
-        `(${c.centerX.toFixed(0)},${c.centerZ.toFixed(0)}) s=${c.strength.toFixed(2)}`).join(' ');
+        `(${c.centerX.toFixed(0)},${c.centerZ.toFixed(0)}) s=${c.strength.toFixed(0)} 각=${(Math.atan2(c.dirZ, c.dirX) * 180 / Math.PI).toFixed(0)}d 모m=(${c.momX.toFixed(1)},${c.momZ.toFixed(1)}) ext=${c.extent.toFixed(0)}`).join(' | ');
+      const claimedAnchor = breakerAnchors.find((a) => a.component);
+      const anchorAngle = claimedAnchor ? (Math.atan2(claimedAnchor.dirZ, claimedAnchor.dirX) * 180 / Math.PI).toFixed(0) : '-';
       console.log(
-        `[breaker] 감지=${components.length} 거리필터통과=${filteredComponents.length} 앵커획득=${claimed} envelope=[${breakerAnchors.map((a) => a.envelope.toFixed(2)).join(', ')}]`,
-        components.length ? `최대컴포넌트: ${sample}` : '컴포넌트 없음 — GPU 감지 실패'
+        `[breaker] 감지=${components.length} 통과=${filteredComponents.length} 획득=${claimed} env=[${breakerAnchors.map((a) => a.envelope.toFixed(2)).join(',')}] 앵커각=${anchorAngle}d`,
+        components.length ? `최대: ${sample}` : '컴포넌트 없음'
       );
       // Raw GPU summary: where does the detection actually score?
       const active = [];
