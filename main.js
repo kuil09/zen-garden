@@ -232,8 +232,9 @@ function parseDevParams() {
   if (q.has('camera')) DEV.camera = q.get('camera');
   if (q.has('capture')) DEV.capture = q.get('capture') === '1' || q.get('capture') === 'true';
   if (q.has('debug')) DEV.debug = q.get('debug') === 'regions' ? 1 : (parseInt(q.get('debug'), 10) || 0);
+  // ?test: slider panel only (no forced breaker)
   if (q.has('test')) DEV.test = q.get('test') === '1' || q.get('test') === 'true';
-  TEST.active = DEV.test;
+  TEST.active = false;  // forced breaker disabled per user request
 }
 
 // Build a live slider panel for empirical art-direction tuning. Injected when
@@ -251,6 +252,21 @@ function buildTestPanel() {
   const sub = document.createElement('small');
   sub.textContent = '?test=1 — 슬라이더로 실시간 튜닝';
   panel.appendChild(sub);
+
+  // Debug regions checkbox
+  const debugRow = document.createElement('div');
+  debugRow.style.marginTop = '6px';
+  const debugCheck = document.createElement('input');
+  debugCheck.type = 'checkbox';
+  debugCheck.checked = DEV.debug > 0.5;
+  debugCheck.style.marginRight = '4px';
+  debugCheck.onchange = () => { DEV.debug = debugCheck.checked ? 1 : 0; };
+  debugRow.appendChild(debugCheck);
+  const debugLabel = document.createElement('label');
+  debugLabel.textContent = '?debug=regions (색 라벨링)';
+  debugLabel.style.fontSize = '11px';
+  debugRow.appendChild(debugLabel);
+  panel.appendChild(debugRow);
 
   // Legend for ?debug=regions
   const legend = document.createElement('div');
@@ -326,34 +342,7 @@ function buildTestPanel() {
     inputRefs.push({ input, valSpan, cfg });
   });
 
-  if (DEV.hero) {
-    const pRow = document.createElement('div');
-    pRow.style.marginTop = '8px';
-    const pLabel = document.createElement('label');
-    pLabel.style.cssText = 'display:flex;align-items:center;gap:4px;';
-    const pName = document.createElement('span');
-    pName.style.flex = '1';
-    pName.textContent = 'phase';
-    pLabel.appendChild(pName);
-    const pInput = document.createElement('input');
-    pInput.type = 'range';
-    pInput.min = '0';
-    pInput.max = '1';
-    pInput.step = '0.01';
-    pInput.value = String(DEV.phase ?? 0.5);
-    pInput.style.cssText = 'flex:2;width:80px;';
-    const pVal = document.createElement('span');
-    pVal.style.cssText = 'width:32px;text-align:right;font-size:11px;';
-    pVal.textContent = (DEV.phase ?? 0.5).toFixed(2);
-    pInput.oninput = () => {
-      DEV.phase = parseFloat(pInput.value);
-      pVal.textContent = DEV.phase.toFixed(2);
-    };
-    pLabel.appendChild(pInput);
-    pLabel.appendChild(pVal);
-    pRow.appendChild(pLabel);
-    panel.appendChild(pRow);
-  }
+  // ?hero feature removed per user request
 
   const resetBtn = document.createElement('button');
   resetBtn.textContent = 'Reset defaults';
@@ -378,7 +367,6 @@ function buildTestPanel() {
 // Returns the art-parameter set for a given normalized phase, or null if the
 // preset is unknown. Consumed by the breaker placement code so the hero macro
 // silhouette is driven by phase curves rather than live simulation detection.
-function heroArtParams(phase) {
   const preset = HERO_PRESETS[DEV.preset];
   if (!preset) return null;
   const p = clamp01(phase);
@@ -398,7 +386,7 @@ function heroArtParams(phase) {
 let device;
 // #10: current normalized hero phase (0..1). Driven by DEV.phase when set for
 // deterministic capture, otherwise loops from elapsed time.
-let heroPhase = 0;
+// heroPhase removed (hero feature disabled)
 let context;
 let format;
 
