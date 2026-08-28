@@ -978,9 +978,11 @@ function createInitialDynamicState() {
     // Main breaker: placed at the Hokusai composition focus so it naturally
     // breaks within the frame. Higher amplitude and tighter width give a
     // plunging crest that the breaker sheets can ride.
-    // Main breaker: spawns just in front of the camera and travels away (+z),
-    // growing until it breaks within the frame (camera is at z≈-32 looking +z).
-    { direction: normalize2([0.20, 0.98]), center: [-10.5, -20.0], amplitude: 4.20, modulation: 0.10, phase: 0.6 },
+    // Main breaker: travels ACROSS the frame (+x) at a fixed depth in front of
+    // the camera (z≈12 = 44 units ahead of the camera at z≈-32). The domain is
+    // a wrapping torus, so the wave cycles in x but always stays at breaking
+    // depth in view — whenever it grows tall enough to break, it is on screen.
+    { direction: normalize2([0.98, 0.20]), center: [0.0, 12.0], amplitude: 4.20, modulation: 0.10, phase: 0.6 },
     { direction: normalize2([-0.55, 0.83]), center: [7, 3], amplitude: 1.80, modulation: 0.12, phase: 2.0 },
     { direction: normalize2([0.90, -0.44]), center: [-18, 27], amplitude: 1.20, modulation: 0.08, phase: -1.1 },
   ];
