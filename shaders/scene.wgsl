@@ -264,6 +264,10 @@ fn surfaceFragment(input: SurfaceOutput) -> @location(0) vec4f {
   let onSheet = input.sheetWeight > 0.5;
   let onClaw = input.sheetWeight > 1.5;
 
+  // #9 Woodblock: material classification and flow class
+  let material = classifyMaterial(input.foam, input.compression, input.sheetWeight, input.waveHeight);
+  let flow = flowClass(input.sheetCoordinates);
+
   // Cut the fingers out of the claw strip. Everything past the finger's length is
   // not water at all, so it never reaches the plate.
   if (onClaw) {
@@ -305,10 +309,6 @@ fn surfaceFragment(input: SurfaceOutput) -> @location(0) vec4f {
 
   // Material classification drives the plate, not just profile coordinate.
   // material and flow are already declared above (line ~307-308)
-  // Update material based on current input (reassignment not allowed in WGSL, so we use different names)
-  let mat = classifyMaterial(input.foam, input.compression, input.sheetWeight, input.waveHeight);
-  let flw = flowClass(input.sheetCoordinates);
-
   // The plate a surface belongs to is decided by where it sits on the wave, not
   // by a light source. On the breaker the profile coordinate does that directly:
   // deep ink at the trough, pale plate up at the lip.
