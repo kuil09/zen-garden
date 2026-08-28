@@ -504,7 +504,13 @@ function extractBreakerComponents(summary) {
   const neighborOffsets = [[1, 0], [-1, 0], [0, 1], [0, -1]];
   for (let index = 0; index < blockCount; index += 1) {
     const block = blocks[index];
-    if (componentOf.has(index) || block.normMax <= 0.3 || block.sumScore <= 1e-4) continue;
+    // Absolute score gate: most of the domain carries a faint, meaningless
+    // score (0.00-0.01). Without an absolute threshold the relative normMax
+    // test sweeps all 64 blocks into ONE giant component, so the breaker sheet
+    // becomes a wall spanning the whole domain instead of a localised wave.
+    if (componentOf.has(index)) continue;
+    if (block.maxScore <= 0.08) continue;
+    if (block.normMax <= 0.3 || block.sumScore <= 1e-4) continue;
     const componentId = components.length;
     const stack = [index];
     componentOf.set(index, componentId);
