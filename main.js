@@ -188,15 +188,15 @@ const HERO_PRESETS = {
   kanagawa: {
     cycleSeconds: 18,
     anchor: { mode: 'camera-relative', x: -0.18, y: -0.08, depth: 42 },
-    height:        [[0.00, 0.30], [0.16, 0.55], [0.36, 0.95], [0.58, 1.00], [0.72, 0.95], [0.86, 0.60], [1.00, 0.30]],
-    faceConcavity: [[0.00, 0.10], [0.36, 0.55], [0.58, 0.70], [0.86, 0.30], [1.00, 0.10]],
-    crestMass:     [[0.00, 0.20], [0.36, 0.60], [0.58, 0.85], [0.72, 0.80], [1.00, 0.20]],
-    hookReach:     [[0.00, 0.00], [0.36, 0.45], [0.58, 0.80], [0.72, 0.75], [1.00, 0.00]],
-    tongueDrop:    [[0.00, 0.00], [0.36, 0.20], [0.58, 0.55], [0.72, 0.50], [1.00, 0.00]],
-    ridgeBow:      [[0.00, 0.00], [0.36, 0.35], [0.58, 0.60], [0.86, 0.20], [1.00, 0.00]],
-    foamVisibility:[[0.00, 0.00], [0.36, 0.40], [0.58, 0.90], [0.72, 1.00], [0.86, 0.50], [1.00, 0.00]],
-    secondaryRidge:[[0.00, 0.00], [0.36, 0.30], [0.58, 0.65], [0.72, 0.55], [1.00, 0.00]],
-    surfaceFlow:   [[0.00, 0.10], [0.36, 0.60], [0.58, 0.85], [0.86, 0.40], [1.00, 0.10]],
+    height:        [[0.00, 0.20], [0.16, 0.40], [0.36, 0.85], [0.58, 0.95], [0.72, 0.90], [0.86, 0.50], [1.00, 0.20]],
+    faceConcavity: [[0.00, 0.05], [0.36, 0.35], [0.58, 0.30], [0.86, 0.15], [1.00, 0.05]],
+    crestMass:     [[0.00, 0.10], [0.36, 0.45], [0.58, 0.75], [0.72, 0.70], [1.00, 0.10]],
+    hookReach:     [[0.00, 0.00], [0.36, 0.30], [0.58, 0.65], [0.72, 0.60], [1.00, 0.00]],
+    tongueDrop:    [[0.00, 0.00], [0.36, 0.12], [0.58, 0.40], [0.72, 0.35], [1.00, 0.00]],
+    ridgeBow:      [[0.00, 0.00], [0.36, 0.25], [0.58, 0.50], [0.86, 0.15], [1.00, 0.00]],
+    foamVisibility:[[0.00, 0.00], [0.36, 0.30], [0.58, 0.85], [0.72, 1.00], [0.86, 0.40], [1.00, 0.00]],
+    secondaryRidge:[[0.00, 0.00], [0.36, 0.20], [0.58, 0.55], [0.72, 0.45], [1.00, 0.00]],
+    surfaceFlow:   [[0.00, 0.05], [0.36, 0.50], [0.58, 0.80], [0.86, 0.35], [1.00, 0.05]],
   },
 };
 
@@ -755,7 +755,7 @@ function updateBreakerAnchors(summary) {
     const dz = c.centerZ - cameraZ;
     return dx * dx + dz * dz >= MIN_BREAKER_DIST_FROM_CAMERA * MIN_BREAKER_DIST_FROM_CAMERA;
   });
-  if (FORCE_BREAKER || DEV.hero) {  // ?test=1은 자연스러운 스폰 유지
+  if (FORCE_BREAKER) {  // ?hero is now handled by shader params, not forced spawn  // ?test=1은 자연스러운 스폰 유지
     // Synthesize a breaking component directly ahead of the camera so a breaker
     // is guaranteed visible (forcebreaker: verify profile; hero: deterministic capture).
     filteredComponents.push({
