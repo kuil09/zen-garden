@@ -443,6 +443,7 @@ let sprayRenderBindGroup;
 // Camera world position for breaker spawn filtering
 let cameraWorldPos = [0.0, 0.0, 0.0];
 let wavePipeline;
+let foamPipeline;
 let sceneTexture;
 let multisampleTexture;
 let depthTexture;
@@ -1628,6 +1629,14 @@ function createComputeAndScenePipelines(modules) {
     ...breakerSurfaceBase,
     vertex: { ...surfaceVertex, entryPoint: 'waveVertex' },
   });
+  foamPipeline = device.createRenderPipeline({
+    layout: 'auto',
+    vertex: { module: sceneModule, entryPoint: 'foamVertex', buffers: [] },
+    fragment: { module: sceneModule, entryPoint: 'surfaceFragment', targets: [{ format, blend: { color: { srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha' } } }] },
+    primitive: { topology: 'triangle-strip', cullMode: 'none' },
+    depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less' },
+  });
+
   clawPipeline = device.createRenderPipeline({
     ...breakerSurfaceBase,
     vertex: { ...surfaceVertex, entryPoint: 'clawVertex' },
