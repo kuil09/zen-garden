@@ -588,7 +588,7 @@ function updateBreakerAnchors(summary) {
   breakerSummary = summary;
   const components = extractBreakerComponents(summary);
   // Filter out breakers too close to the camera
-  const MIN_BREAKER_DIST_FROM_CAMERA = 45.0; // world units - increased from 30
+  const MIN_BREAKER_DIST_FROM_CAMERA = 25.0; // world units
   const cameraX = cameraWorldPos[0];
   const cameraZ = cameraWorldPos[2];
   const filteredComponents = components.filter((c) => {
@@ -976,7 +976,7 @@ function createInitialDynamicState() {
     // Main breaker: placed at the Hokusai composition focus so it naturally
     // breaks within the frame. Higher amplitude and tighter width give a
     // plunging crest that the breaker sheets can ride.
-    { direction: normalize2([0.20, -0.98]), center: [-10.5, 14.0], amplitude: 4.20, modulation: 0.10, phase: 0.6 },
+    { direction: normalize2([0.20, -0.98]), center: [-10.5, 14.0], amplitude: 4.20, modulation: 0.10, phase: 1.4 },
     { direction: normalize2([-0.55, 0.83]), center: [7, 3], amplitude: 1.80, modulation: 0.12, phase: 2.0 },
     { direction: normalize2([0.90, -0.44]), center: [-18, 27], amplitude: 1.20, modulation: 0.08, phase: -1.1 },
   ];
