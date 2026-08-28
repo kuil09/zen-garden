@@ -816,16 +816,16 @@ function updateBreakerAnchors(summary) {
     const rand = mulberry32(Math.abs(seed >>> 0));
     const varScale = 0.15 + 0.1 * relative; // more variation for dominant breakers
     
-    anchor.targetRadius = Math.min(8.5, (1.6 + 6.0 * relative) * (1.0 + (rand() - 0.5) * varScale));
-    anchor.targetHeightGain = Math.min(1.2, (0.42 + 0.58 * relative) * (1.0 + (rand() - 0.5) * varScale));
-    anchor.curlRate = (0.61 - 0.19 * relative) * (1.0 + (rand() - 0.5) * 0.1);
-    anchor.curlWaves = Math.min(8, Math.max(2.5, anchor.extent / 9)) * (1.0 + (rand() - 0.5) * 0.08);
-    anchor.targetCrestPeak = (0.55 - 0.25 * relative) * (1.0 + (rand() - 0.5) * 0.12);
-    anchor.targetCrestWidth = (0.58 - 0.06 * relative) * (1.0 + (rand() - 0.5) * 0.15);
-    anchor.targetThetaSpan = (3.0 + 2.2 * relative) * (1.0 + (rand() - 0.5) * 0.1);
-    anchor.taper = 0.4 * (1.0 + (rand() - 0.5) * 0.2);
-    anchor.targetThrowGain = (0.55 + 0.55 * relative) * (1.0 + (rand() - 0.5) * varScale);
-    anchor.targetDetailGain = Math.min(1.5, (0.7 + 0.6 * relative) * (1.0 + (rand() - 0.5) * 0.12));
+    anchor.targetRadius = Math.min(8.5, (1.6 + 6.0 * relative) * (TEST.active ? 1.0 : (1.0 + (rand() - 0.5) * varScale)));
+    anchor.targetHeightGain = Math.min(1.2, (0.42 + 0.58 * relative) * (TEST.active ? 1.0 : (1.0 + (rand() - 0.5) * varScale)));
+    anchor.curlRate = (0.61 - 0.19 * relative) * (TEST.active ? 1.0 : (1.0 + (rand() - 0.5) * 0.1));
+    anchor.curlWaves = Math.min(8, Math.max(2.5, anchor.extent / 9)) * (TEST.active ? 1.0 : (1.0 + (rand() - 0.5) * 0.08));
+    anchor.targetCrestPeak = (0.55 - 0.25 * relative) * (TEST.active ? 1.0 : (1.0 + (rand() - 0.5) * 0.12));
+    anchor.targetCrestWidth = (0.58 - 0.06 * relative) * (TEST.active ? 1.0 : (1.0 + (rand() - 0.5) * 0.15));
+    anchor.targetThetaSpan = (3.0 + 2.2 * relative) * (TEST.active ? 1.0 : (1.0 + (rand() - 0.5) * 0.1));
+    anchor.taper = 0.4 * (TEST.active ? 1.0 : (1.0 + (rand() - 0.5) * 0.2));
+    anchor.targetThrowGain = (0.55 + 0.55 * relative) * (TEST.active ? 1.0 : (1.0 + (rand() - 0.5) * varScale));
+    anchor.targetDetailGain = Math.min(1.5, (0.7 + 0.6 * relative) * (TEST.active ? 1.0 : (1.0 + (rand() - 0.5) * 0.12)));
   }
 
   // Test-mode live overrides: sliders (?test) replace simulation-derived targets so
@@ -833,6 +833,9 @@ function updateBreakerAnchors(summary) {
   if (TEST.active) {
     const a = breakerAnchors.find((x) => x.component) || breakerAnchors[0];
     if (a) {
+      // Bypass envelope growth so the test wave appears instantly and stays stable.
+      a.envelope = 1;
+      a.targetEnvelope = 1;
       if (TEST.heightGain != null) a.targetHeightGain = TEST.heightGain;
       if (TEST.radius != null) a.targetRadius = TEST.radius;
       if (TEST.crestPeak != null) a.targetCrestPeak = TEST.crestPeak;
