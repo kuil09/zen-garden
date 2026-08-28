@@ -688,6 +688,16 @@ function updateBreakerAnchors(summary) {
         `[breaker] 감지=${components.length} 거리필터통과=${filteredComponents.length} 앵커획득=${claimed} envelope=[${breakerAnchors.map((a) => a.envelope.toFixed(2)).join(', ')}]`,
         components.length ? `최대컴포넌트: ${sample}` : '컴포넌트 없음 — GPU 감지 실패'
       );
+      // Raw GPU summary: where does the detection actually score?
+      const active = [];
+      for (let i = 0; i < BREAKER_BLOCKS * BREAKER_BLOCKS; i += 1) {
+        const o = i * BLOCK_FLOATS;
+        if (summary[o] > 1e-4) {
+          active.push(`b${i}(${summary[o + 2].toFixed(0)},${summary[o + 3].toFixed(0)}) s=${summary[o].toFixed(2)}`);
+        }
+      }
+      console.log(`[breaker] GPU 활성블록 ${active.length}/64:`, active.slice(0, 12).join(' '));
+      console.log(`[breaker] 카메라=(${cameraWorldPos[0].toFixed(0)},${cameraWorldPos[2].toFixed(0)})`);
     }
   }
 }
