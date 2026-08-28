@@ -267,7 +267,7 @@ fn waveSample(uv: vec2f, params: WaveParams, time: f32) -> WaveSample {
   let axis = vec3f(along.z, 0.0, -along.x);
 
   let curl = waveCurl(uv.x, params, time);
-  let scale = waveCrestScale(uv.x, params) * params.radius;
+  let scale = waveCrestScale(uv.x, params) * (params.radius / WAVE_CREST_RADIUS);
   let profile = waveProfile(uv.y, curl, params);
 
   // Straight ridge: the crest line and the profile sweep axis share the same
