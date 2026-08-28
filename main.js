@@ -403,6 +403,7 @@ let breakerSummaryBuffer;
 let breakerStagingBuffer;
 let breakerParamsBuffer;
 let foamFingerBuffer;
+let foamVertexBuffer;
 let fractureBuffer;
 let breakerBindGroups;
 
@@ -1441,6 +1442,13 @@ function createBreakerBuffers() {
   });
   breakerParamsBuffer = createZeroedBuffer(breakerAnchors.length * 40 * 4, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
   foamFingerBuffer = createZeroedBuffer(16 * 16 * 4, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+  foamVertexBuffer = device.createBuffer({
+    size: 4 * 2 * 4, // 4 vertices, vec2f each
+    usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+    mappedAtCreation: true,
+  });
+  new Float32Array(foamVertexBuffer.getMappedRange()).set([0,0, 1,0, 0,1, 1,1]);
+  foamVertexBuffer.unmap();
   fractureBuffer = createZeroedBuffer(4 * 16 * 4, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST); // 4 features max // 16 fingers max, 16 floats each
 }
 
@@ -1655,7 +1663,10 @@ function createComputeAndScenePipelines(modules) {
   });
   foamPipeline = device.createRenderPipeline({
     layout: 'auto',
-    vertex: { module: sceneModule, entryPoint: 'foamVertex', buffers: [] },
+    vertex: { module: sceneModule, entryPoint: 'foamVertex', buffers: [{
+      arrayStride: 8,
+      attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x2' }],
+    }] },
     fragment: { module: sceneModule, entryPoint: 'surfaceFragment', targets: [{ format, blend: { color: { srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha' }, alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' } } }] },
     primitive: { topology: 'triangle-strip', cullMode: 'none' },
     depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less' },
