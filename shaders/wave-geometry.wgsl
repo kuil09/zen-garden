@@ -512,16 +512,26 @@ fn foamFingerWidth(finger: FoamFinger, t: f32) -> f32 {
 @vertex
 fn foamVertex(@location(0) uv: vec2f, @builtin(instance_index) instance: u32) -> SurfaceOutput {
   let finger = foamFingers[instance];
-  // For now, use a simple quad expansion; real ribbon needs more vertices.
-  // This is a minimal scaffold to verify the pipeline connection.
+  // Reconstruct profile position from rootU/rootV on the wave sheet.
+  // For simplicity, place fingers at a fixed offset from the crest line.
+  let t = uv.x;  // parameter along finger (0=root, 1=tip)
+  let s = uv.y;  // side offset (-1..1)
+  // Use foamFingerPoint to get 3D position on the ribbon centreline.
+  // Profile position approximated at rootU/rootV.
+  let profilePos = vec3f(finger.root.x * 10.0, 1.5, finger.root.y * 10.0);
+  let crestTangent = vec3f(1.0, 0.0, 0.0);
+  let centre = foamFingerPoint(finger, profilePos, crestTangent, t);
+  let width = foamFingerWidth(finger, t);
+  let side = normalize(cross(crestTangent, vec3f(0.0, 1.0, 0.0)));
+  let pos = centre + side * s * width;
   var output: SurfaceOutput;
-  output.position = vec4f(0.0, 0.0, 0.0, 1.0);
-  output.worldPosition = vec3f(0.0);
+  output.position = u.viewProjection * vec4f(pos, 1.0);
+  output.worldPosition = pos;
   output.normal = vec3f(0.0, 1.0, 0.0);
-  output.fieldCoordinates = vec2f(0.0);
+  output.fieldCoordinates = pos.xz;
   output.foam = 1.0;
   output.compression = 0.0;
-  output.waveHeight = 0.0;
+  output.waveHeight = pos.y;
   output.sheetCoordinates = uv;
   output.sheetWeight = 0.0;
   return output;
