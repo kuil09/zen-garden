@@ -270,17 +270,47 @@ fn waveSample(uv: vec2f, params: WaveParams, time: f32) -> WaveSample {
   let scale = waveCrestScale(uv.x, params) * (params.radius / WAVE_CREST_RADIUS);
   let profile = waveProfile(uv.y, curl, params);
 
-  // Straight ridge: the crest line and the profile sweep axis share the same
-  // basis (along/axis). Curving the centreline twisted the sheet, because the
-  // profile's forward direction stays on `axis` while the ridge bows away —
-  // that mismatch rotated the whole sheet about the water plane.
-  var position = params.originA
+  // Compute base position on the wave surface
+  let basePos = params.originA
     + along * (uv.x * span)
     + axis * (profile.x * scale)
     + vec3f(0.0, profile.y * scale, 0.0);
 
-  // The existing spectral / shallow-water field is still doing the work: it rides
-  // on the sheet as surface detail so the wave never looks like a static sculpture.
+  // Compute normals analytically from the wave profile derivatives
+  let stepU = 1.0 / 320.0;
+  let stepV = 1.0 / 200.0;
+  let uPlus = clamp(uv.x + 1.0/320.0, 0.0, 1.0);
+  let vPlus = clamp(uv.y + 1.0/200.0, 0.0, 1.0);
+
+  // Compute positions for tangent estimation
+  let curlU = waveCurl(uPlus, params, time);
+  let scaleU = waveCrestScale(uPlus, params) * (params.radius / WAVE_CREST_RADIUS);
+  let profileU = waveProfile(uv.y, curl, params);
+  let posU = params.originA + along * (uPlus * span) + axis * (profileU.x * scale) + vec3f(0.0, profileU.y * scale, 0.0);
+
+  let vPlus = clamp(uv.y + 1.0/200.0, 0.0, 1.0);
+  let profileV = waveProfile(vPlus, curl, params);
+  let posV = params.originA + along * (uv.x * span) + axis * (profileV.x * scale) + vec3f(0.0, profileV.y * scale, 0.0);
+
+  let basePos = params.originA + along * (uv.x * span) + axis * (profile.x * scale) + vec3f(0.0, profile.y * scale, 0.0);
+  let tangentU = posU - basePos;
+  let tangentV = posV - basePos;
+
+  var normal = normalize(cross(tangentV, tangentU));
+  if (length(tangentU) < 1e-6 || length(tangentV) < 1e-6) {
+    normal = vec3f(0.0, 1.0, 0.0);
+  }
+
+  // Wave thickness proportional to radius
+  let thickness = 0.6 * params.radius;
+  let thicknessOffset = (uv.y - 0.5) * 2.0 * 0.5;  // -0.5 to +0.5 * thickness
+
+  var position = params.originA
+    + along * (uv.x * span)
+    + axis * (profile.x * scale)
+    + vec3f(0.0, profile.y * scale, 0.0);
+  position += normal * (thicknessOffset * 0.5);  // Extrude along normal for thickness
+
   let field = sampleOceanWorld(position.xz);
   let detail = field.displacementFoam.y * 0.30 * params.detailGain
     * smoothstep(0.0, 0.30, uv.y);
