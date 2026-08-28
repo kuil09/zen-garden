@@ -1,0 +1,93 @@
+{
+  "version": 4,
+  "todos": [],
+  "groups": [
+    {
+      "id": "g_9ac42e7c2bfb",
+      "title": "테스트 모드 슬라이더 패널 (?test)",
+      "todos": [
+        {
+          "id": "t_95fa0fb466fb",
+          "title": "슬라이더 패널 구현 (?test 플래그 + HTML range 주입)",
+          "status": "in_progress",
+          "origin": "agent",
+          "createdAt": "2026-08-28T01:30:10.154Z",
+          "updatedAt": "2026-08-28T01:30:10.154Z",
+          "note": "breaker art 파라미터 + hook/tongue 스케일을 라이브 조정"
+        },
+        {
+          "id": "t_356b76f95163",
+          "title": "waveProfile hook/tongue 스케일 유니폼 연결",
+          "status": "pending",
+          "origin": "agent",
+          "createdAt": "2026-08-28T01:30:10.154Z",
+          "updatedAt": "2026-08-28T01:30:10.154Z",
+          "note": "waveProfile에 u.debugMode.y/z 훅/혀 스케일 적용"
+        },
+        {
+          "id": "t_f176e3f7bb17",
+          "title": "TEST 오버라이드를 breaker 타깃에 반영",
+          "status": "pending",
+          "origin": "agent",
+          "createdAt": "2026-08-28T01:30:10.154Z",
+          "updatedAt": "2026-08-28T01:30:10.154Z",
+          "note": "updateBreakerAnchors에 TEST 오버라이드 적용"
+        }
+      ]
+    },
+    {
+      "id": "g_dd7e094335cd",
+      "title": "Hero Wave 실제 연결 (#10)",
+      "todos": [
+        {
+          "id": "t_2219e4fcd388",
+          "title": "#10 Hero Wave placement 연결",
+          "status": "pending",
+          "origin": "agent",
+          "createdAt": "2026-08-28T01:30:10.154Z",
+          "updatedAt": "2026-08-28T01:30:10.154Z",
+          "note": "heroArtParams가 placement를 실제 구동, ?hero 기본 동작"
+        },
+        {
+          "id": "t_0ae4c1c3cdd7",
+          "title": "phase 슬라이더 노출",
+          "status": "pending",
+          "origin": "agent",
+          "createdAt": "2026-08-28T01:30:10.154Z",
+          "updatedAt": "2026-08-28T01:30:10.154Z",
+          "note": "테스트 모드에서 phase 슬라이더 노출"
+        }
+      ]
+    },
+    {
+      "id": "g_2c185c7e0418",
+      "title": "#7/#8/#9/#12 연결 계획 (GPU 검증 필요)",
+      "todos": [
+        {
+          "id": "t_b35d18bce8a3",
+          "title": "연결 계획 수립 및 부분 시작",
+          "status": "pending",
+          "origin": "agent",
+          "createdAt": "2026-08-28T01:30:10.154Z",
+          "updatedAt": "2026-08-28T01:30:10.154Z",
+          "note": "각 요소 파이프라인 연결 순서/리스크 문서화, 부분 스캐폴딩"
+        }
+      ]
+    },
+    {
+      "id": "g_674cfd15fc03",
+      "title": "검증 및 main force push",
+      "todos": [
+        {
+          "id": "t_b12788aa2c4c",
+          "title": "검증 후 main force push",
+          "status": "pending",
+          "origin": "agent",
+          "createdAt": "2026-08-28T01:30:10.154Z",
+          "updatedAt": "2026-08-28T01:30:10.154Z",
+          "note": "node --check + WGSL brace, main 병합 후 force push"
+        }
+      ]
+    }
+  ]
+}

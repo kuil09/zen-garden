@@ -211,6 +211,16 @@ const DEV = {
   camera: 'default', // 'default' | 'print' (front) | 'yaw-20' | 'yaw+20'
   capture: false,    // ?capture=1 deterministic capture mode (#5)
   debug: 0,         // 0=off, 1=regions tint (see docs/art-direction-params.md)
+  test: false,      // ?test=1 => live slider panel for empirical tuning
+};
+
+// Test-mode live overrides. Sliders write these; they replace the simulation-
+// derived breaker targets so each value can be tuned by eye. Null = use default.
+const TEST = {
+  active: false,
+  heightGain: null, crestPeak: null, crestWidth: null,
+  curlWaves: null, taper: null, thetaSpan: null, throwGain: null, detailGain: null,
+  radius: null, hookScale: 0, tongueScale: 0,
 };
 
 function parseDevParams() {
@@ -222,7 +232,132 @@ function parseDevParams() {
   if (q.has('camera')) DEV.camera = q.get('camera');
   if (q.has('capture')) DEV.capture = q.get('capture') === '1' || q.get('capture') === 'true';
   if (q.has('debug')) DEV.debug = q.get('debug') === 'regions' ? 1 : (parseInt(q.get('debug'), 10) || 0);
+  if (q.has('test')) DEV.test = q.get('test') === '1' || q.get('test') === 'true';
+  TEST.active = DEV.test;
 }
+
+// Build a live slider panel for empirical art-direction tuning. Injected when
+// ?test=1 is present. All strings use single quotes to avoid JSON escaping
+// issues inside the edit tool.
+function buildTestPanel() {
+  const panel = document.createElement('div');
+  panel.style.cssText = 'position:fixed;top:10px;right:10px;width:280px;max-height:90vh;overflow-y:auto;background:rgba(0,0,0,0.85);color:#eee;padding:10px;border-radius:8px;font:12px/1.4 monospace;z-index:9999;';
+
+  const title = document.createElement('b');
+  title.textContent = '🎨 art-direction test mode';
+  panel.appendChild(title);
+
+  panel.appendChild(document.createElement('br'));
+  const sub = document.createElement('small');
+  sub.textContent = '?test=1 — 슬라이더로 실시간 튜닝';
+  panel.appendChild(sub);
+
+  const hr = document.createElement('hr');
+  hr.style.borderColor = '#444';
+  panel.appendChild(hr);
+
+  // 슬라이더 설정 (함수 내 closure로 유지)
+  const SLIDER_CFGS = [
+    { key: 'heightGain', label: '높이(heightGain)', min: 0, max: 2, step: 0.01, def: 1.0 },
+    { key: 'radius', label: '반경(radius)', min: 2, max: 12, step: 0.1, def: 8 },
+    { key: 'crestPeak', label: '능선위치(crestPeak)', min: 0, max: 1, step: 0.01, def: 0.55 },
+    { key: 'crestWidth', label: '능선폭(crestWidth)', min: 0.2, max: 1, step: 0.01, def: 0.55 },
+    { key: 'curlWaves', label: '말림횟수(curlWaves)', min: 2, max: 8, step: 0.1, def: 5.5 },
+    { key: 'taper', label: '테이퍼(taper)', min: 0, max: 1, step: 0.01, def: 0.5 },
+    { key: 'thetaSpan', label: '각도범위(thetaSpan)', min: 1, max: 6, step: 0.1, def: 5 },
+    { key: 'throwGain', label: '던지기(throwGain)', min: 0, max: 3, step: 0.05, def: 1.8 },
+    { key: 'detailGain', label: '디테일(detailGain)', min: 0, max: 2, step: 0.05, def: 1.5 },
+    { key: 'hookScale', label: '훅스케일(hookScale)', min: -0.5, max: 1.5, step: 0.05, def: 0 },
+    { key: 'tongueScale', label: '혀스케일(tongueScale)', min: -0.5, max: 1.5, step: 0.05, def: 0 },
+  ];
+
+  const inputRefs = [];  // {input, valSpan, cfg}
+
+  SLIDER_CFGS.forEach(cfg => {
+    const row = document.createElement('div');
+    row.style.marginBottom = '4px';
+
+    const label = document.createElement('label');
+    label.style.cssText = 'display:flex;align-items:center;gap:4px;';
+
+    const nameSpan = document.createElement('span');
+    nameSpan.style.flex = '1';
+    nameSpan.textContent = cfg.label;
+    label.appendChild(nameSpan);
+
+    const input = document.createElement('input');
+    input.type = 'range';
+    input.min = String(cfg.min);
+    input.max = String(cfg.max);
+    input.step = String(cfg.step);
+    input.value = String(cfg.def);
+    input.style.cssText = 'flex:2;width:80px;';
+    input.dataset.key = cfg.key;
+
+    const valSpan = document.createElement('span');
+    valSpan.style.cssText = 'width:32px;text-align:right;font-size:11px;';
+    valSpan.textContent = cfg.def.toFixed(2);
+
+    input.oninput = () => {
+      valSpan.textContent = parseFloat(input.value).toFixed(2);
+      TEST[cfg.key] = parseFloat(input.value);
+    };
+
+    label.appendChild(input);
+    label.appendChild(valSpan);
+    row.appendChild(label);
+    panel.appendChild(row);
+    inputRefs.push({ input, valSpan, cfg });
+  });
+
+  if (DEV.hero) {
+    const pRow = document.createElement('div');
+    pRow.style.marginTop = '8px';
+    const pLabel = document.createElement('label');
+    pLabel.style.cssText = 'display:flex;align-items:center;gap:4px;';
+    const pName = document.createElement('span');
+    pName.style.flex = '1';
+    pName.textContent = 'phase';
+    pLabel.appendChild(pName);
+    const pInput = document.createElement('input');
+    pInput.type = 'range';
+    pInput.min = '0';
+    pInput.max = '1';
+    pInput.step = '0.01';
+    pInput.value = String(DEV.phase ?? 0.5);
+    pInput.style.cssText = 'flex:2;width:80px;';
+    const pVal = document.createElement('span');
+    pVal.style.cssText = 'width:32px;text-align:right;font-size:11px;';
+    pVal.textContent = (DEV.phase ?? 0.5).toFixed(2);
+    pInput.oninput = () => {
+      DEV.phase = parseFloat(pInput.value);
+      pVal.textContent = DEV.phase.toFixed(2);
+    };
+    pLabel.appendChild(pInput);
+    pLabel.appendChild(pVal);
+    pRow.appendChild(pLabel);
+    panel.appendChild(pRow);
+  }
+
+  const resetBtn = document.createElement('button');
+  resetBtn.textContent = 'Reset defaults';
+  resetBtn.style.cssText = 'margin-top:8px;padding:3px 10px;cursor:pointer;';
+  resetBtn.onclick = () => {
+    // TEST 초기화
+    SLIDER_CFGS.forEach(cfg => {
+      TEST[cfg.key] = cfg.key === 'hookScale' || cfg.key === 'tongueScale' ? 0 : null;
+    });
+    // 슬라이더 입력값도 기본값으로
+    inputRefs.forEach(ref => {
+      ref.input.value = String(ref.cfg.def);
+      ref.valSpan.textContent = ref.cfg.def.toFixed(2);
+    });
+  };
+  panel.appendChild(resetBtn);
+
+  document.body.appendChild(panel);
+}
+
 
 // Returns the art-parameter set for a given normalized phase, or null if the
 // preset is unknown. Consumed by the breaker placement code so the hero macro
@@ -616,7 +751,7 @@ function updateBreakerAnchors(summary) {
     const dz = c.centerZ - cameraZ;
     return dx * dx + dz * dz >= MIN_BREAKER_DIST_FROM_CAMERA * MIN_BREAKER_DIST_FROM_CAMERA;
   });
-  if (FORCE_BREAKER || DEV.hero) {
+  if (FORCE_BREAKER || DEV.hero || DEV.test) {
     // Synthesize a breaking component directly ahead of the camera so a breaker
     // is guaranteed visible (forcebreaker: verify profile; hero: deterministic capture).
     filteredComponents.push({
@@ -693,20 +828,23 @@ function updateBreakerAnchors(summary) {
     anchor.targetDetailGain = Math.min(1.5, (0.7 + 0.6 * relative) * (1.0 + (rand() - 0.5) * 0.12));
   }
 
-  // #10 deterministic Hero Wave: when ?hero is set, drive the claimed breaker's
-  // art params from the phase curve so the same seed/phase always reproduces
-  // the same silhouette. Phase is explicit (DEV.phase) or loops from elapsed.
-  if (DEV.hero) {
-    const claimed = breakerAnchors.find((a) => a.component);
-    if (claimed) {
-      const art = heroArtParams(heroPhase) || {};
-      claimed.phaseOffset = DEV.seed * 0.137;
-      if (art.height != null) {
-        claimed.targetHeightGain = Math.min(1.2, art.height * 1.25);
-        claimed.targetRadius = 3.5 + art.height * 5.0;
-        claimed.targetCrestPeak = 0.55 - 0.25 * art.height;
-        claimed.targetCrestWidth = 0.58 - 0.06 * art.height;
-      }
+  // Test-mode live overrides: sliders (?test) replace simulation-derived targets so
+  // each art value can be tuned by eye. Null fields keep their default.
+  if (TEST.active) {
+    const a = breakerAnchors.find((x) => x.component) || breakerAnchors[0];
+    if (a) {
+      if (TEST.heightGain != null) a.targetHeightGain = TEST.heightGain;
+      if (TEST.radius != null) a.targetRadius = TEST.radius;
+      if (TEST.crestPeak != null) a.targetCrestPeak = TEST.crestPeak;
+      if (TEST.crestWidth != null) a.targetCrestWidth = TEST.crestWidth;
+      if (TEST.curlWaves != null) a.curlWaves = TEST.curlWaves;
+      if (TEST.taper != null) a.taper = TEST.taper;
+      if (TEST.thetaSpan != null) a.targetThetaSpan = TEST.thetaSpan;
+      if (TEST.throwGain != null) a.targetThrowGain = TEST.throwGain;
+      if (TEST.detailGain != null) a.targetDetailGain = TEST.detailGain;
+      // hook/tongue scales feed the shader via debugMode.y/z (see waveProfile)
+      DEV._hookScale = TEST.hookScale;
+      DEV._tongueScale = TEST.tongueScale;
     }
   }
 }
@@ -1173,6 +1311,7 @@ async function initialize() {
   // Reset timers right before starting render loop so first frame has elapsed ≈ 0
   startTime = performance.now();
   previousFrame = performance.now();
+  if (DEV.test) buildTestPanel();
   frameRequest = requestAnimationFrame(draw);
 }
 
@@ -1603,8 +1742,8 @@ function draw(now) {
   uniforms.set([camRight[0], camRight[1], camRight[2], tanHalfY * aspect], 36);
   uniforms.set([camUp[0], camUp[1], camUp[2], tanHalfY], 40);
   uniforms.set([forward[0], forward[1], forward[2], 0], 44);
-  // debugMode.x: 0=off, 1=regions tint (art-direction param map overlay)
-  uniforms.set([DEV.debug, 0, 0, 0], 48);
+  // debugMode.x: 0=off, 1=regions tint. y/z: live hook/tongue scale (test sliders).
+  uniforms.set([DEV.debug, TEST.hookScale, TEST.tongueScale, 0], 48);
   // Mountain removed: background is only sky + clouds now.
   device.queue.writeBuffer(uniformBuffer, 0, uniforms);
   writeEvolveParams(elapsed * motionSpeed, deltaSeconds);
